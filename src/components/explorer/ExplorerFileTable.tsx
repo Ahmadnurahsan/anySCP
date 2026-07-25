@@ -2,6 +2,7 @@ import {
   useState,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useCallback,
 } from "react";
@@ -404,22 +405,30 @@ export function ExplorerFileTable({
 
   // ─── Sort ─────────────────────────────────────────────────────────────────
 
-  const sortedEntries = [...entries].sort((a, b) => {
-    const aIsDir = a.entryType === "Directory";
-    const bIsDir = b.entryType === "Directory";
-    if (aIsDir && !bIsDir) return -1;
-    if (!aIsDir && bIsDir) return 1;
+  const sortedEntries = useMemo(
+    () =>
+      [...entries].sort((a, b) => {
+        const aIsDir = a.entryType === "Directory";
+        const bIsDir = b.entryType === "Directory";
+        if (aIsDir && !bIsDir) return -1;
+        if (!aIsDir && bIsDir) return 1;
 
-    let cmp = 0;
-    if (sortBy === "name") {
-      cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
-    } else if (sortBy === "size") {
-      cmp = a.size - b.size;
-    } else {
-      cmp = (a.modified ?? 0) - (b.modified ?? 0);
-    }
-    return sortAsc ? cmp : -cmp;
-  });
+        let cmp = 0;
+        if (sortBy === "name") {
+          cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+        } else if (sortBy === "size") {
+          cmp = a.size - b.size;
+        } else {
+          cmp = (a.modified ?? 0) - (b.modified ?? 0);
+        }
+        return sortAsc ? cmp : -cmp;
+      }),
+    [entries, sortBy, sortAsc],
+  );
+
+  // Keyboard navigation walks this on every arrow keydown — derive it once per
+  // sort change instead of rebuilding a fresh array per keypress.
+  const sortedIds = useMemo(() => sortedEntries.map((en) => en.id), [sortedEntries]);
 
   const handleSortClick = (col: "name" | "size" | "modified") => {
     if (sortBy === col) {
@@ -970,7 +979,13 @@ export function ExplorerFileTable({
   // reserves a constant width and position — sorting never shifts the header. It
   // sits on the side away from the label's alignment edge; a centered label gets
   // a `col={null}` reserving-only copy on the far side to stay centered.
-  const SortArrow = ({ col, gap }: { col: "name" | "size" | "modified" | null; gap: "ml-0.5" | "mr-0.5" }) => {
+  const SortArrow = ({
+    col,
+    gap,
+  }: {
+    col: "name" | "size" | "modified" | null;
+    gap: "ml-0.5" | "mr-0.5";
+  }) => {
     const active = col !== null && sortBy === col;
     const Icon = active && !sortAsc ? ChevronDown : ChevronUp;
     return (
@@ -983,14 +998,15 @@ export function ExplorerFileTable({
     );
   };
 
-  const thClass = (col: "name" | "size" | "modified") => [
-    // No text-align here — each header sets its own (buttons default to center).
-    // A hardcoded one would beat the columns' text-center in the CSS cascade.
-    "text-[length:var(--text-xs)] font-semibold uppercase tracking-wide text-text-muted",
-    "cursor-pointer select-none hover:text-text-secondary transition-colors duration-[var(--duration-fast)]",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm",
-    sortBy === col ? "text-text-secondary" : "",
-  ].join(" ");
+  const thClass = (col: "name" | "size" | "modified") =>
+    [
+      // No text-align here — each header sets its own (buttons default to center).
+      // A hardcoded one would beat the columns' text-center in the CSS cascade.
+      "text-[length:var(--text-xs)] font-semibold uppercase tracking-wide text-text-muted",
+      "cursor-pointer select-none hover:text-text-secondary transition-colors duration-[var(--duration-fast)]",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm",
+      sortBy === col ? "text-text-secondary" : "",
+    ].join(" ");
 
   // ─── Loading state ───────────────────────────────────────────────────────
   // Only show the skeleton on a genuine first load (no entries yet). When
@@ -1038,7 +1054,9 @@ export function ExplorerFileTable({
           data-testid="explorer-sort-name"
           className={`flex-1 text-left ${thClass("name")}`}
           onClick={() => handleSortClick("name")}
-          aria-sort={sortBy === "name" ? (sortAsc ? "ascending" : "descending") : "none"}
+          aria-sort={
+            sortBy === "name" ? (sortAsc ? "ascending" : "descending") : "none"
+          }
         >
           Name <SortArrow col="name" gap="ml-0.5" />
         </button>
@@ -1047,7 +1065,9 @@ export function ExplorerFileTable({
           data-testid="explorer-sort-size"
           className={`w-20 text-right ${thClass("size")}`}
           onClick={() => handleSortClick("size")}
-          aria-sort={sortBy === "size" ? (sortAsc ? "ascending" : "descending") : "none"}
+          aria-sort={
+            sortBy === "size" ? (sortAsc ? "ascending" : "descending") : "none"
+          }
         >
           <SortArrow col="size" gap="mr-0.5" /> Size
         </button>
@@ -1056,14 +1076,25 @@ export function ExplorerFileTable({
           data-testid="explorer-sort-modified"
           className={`w-44 text-center ${thClass("modified")}`}
           onClick={() => handleSortClick("modified")}
-          aria-sort={sortBy === "modified" ? (sortAsc ? "ascending" : "descending") : "none"}
+          aria-sort={
+            sortBy === "modified"
+              ? sortAsc
+                ? "ascending"
+                : "descending"
+              : "none"
+          }
         >
-          <SortArrow col="modified" gap="mr-0.5" /> Modified <SortArrow col={null} gap="ml-0.5" />
+          <SortArrow col="modified" gap="mr-0.5" /> Modified{" "}
+          <SortArrow col={null} gap="ml-0.5" />
         </button>
 
         {/* Last column: Permissions for SFTP, Class for S3 */}
         <span className="w-24 text-[length:var(--text-xs)] font-semibold uppercase tracking-wide text-text-muted select-none">
-          {caps.hasPermissions ? "Permissions" : caps.hasStorageClass ? "Class" : ""}
+          {caps.hasPermissions
+            ? "Permissions"
+            : caps.hasStorageClass
+              ? "Class"
+              : ""}
         </span>
       </div>
 
@@ -1171,6 +1202,44 @@ export function ExplorerFileTable({
                   onKeyDown={(e) => {
                     const isInput = (e.target as Element).tagName === "INPUT";
                     if (e.key === "Enter" && !isInput) handleDoubleClick(entry);
+                    if (
+                      (e.key === "ArrowDown" || e.key === "ArrowUp") &&
+                      !isInput
+                    ) {
+                      e.preventDefault();
+                      const ids = sortedIds;
+                      const currentIdx = ids.indexOf(entry.id);
+                      const direction = e.key === "ArrowDown" ? 1 : -1;
+                      const nextIdx = Math.min(
+                        Math.max(currentIdx + direction, 0),
+                        ids.length - 1,
+                      );
+                      if (nextIdx === currentIdx) return;
+                      const nextId = ids[nextIdx];
+
+                      if (e.shiftKey) {
+                        const anchorId = lastClickedId.current ?? entry.id;
+                        lastClickedId.current = anchorId;
+                        const anchorIdx = ids.indexOf(anchorId);
+                        const from = Math.min(anchorIdx, nextIdx);
+                        const to = Math.max(anchorIdx, nextIdx);
+                        const range = new Set<string>();
+                        for (let i = from; i <= to; i++) range.add(ids[i]);
+                        setSelectedIds(range);
+                      } else {
+                        setSelectedIds(new Set([nextId]));
+                        lastClickedId.current = nextId;
+                      }
+
+                      const currentRow = e.currentTarget as HTMLElement;
+                      const nextRow = (
+                        direction === 1
+                          ? currentRow.nextElementSibling
+                          : currentRow.previousElementSibling
+                      ) as HTMLElement | null;
+                      nextRow?.focus();
+                      nextRow?.scrollIntoView({ block: "nearest" });
+                    }
                     if (e.key === "F2" && caps.canRename && !isInput) {
                       e.preventDefault();
                       setRenamingId(entry.id);
@@ -1264,7 +1333,9 @@ export function ExplorerFileTable({
 
                   {/* Size */}
                   <span className="w-20 text-right text-[length:var(--text-xs)] text-text-muted shrink-0 font-mono tabular-nums whitespace-nowrap">
-                    {entry.entryType === "Directory" ? "—" : formatBytes(entry.size)}
+                    {entry.entryType === "Directory"
+                      ? "—"
+                      : formatBytes(entry.size)}
                   </span>
 
                   {/* Modified — centered so it doesn't crowd the right-aligned
@@ -1280,7 +1351,11 @@ export function ExplorerFileTable({
 
                   {/* Permissions / Storage Class */}
                   <span
-                    data-entry-perms={caps.hasPermissions ? entry.permissionsDisplay ?? "" : undefined}
+                    data-entry-perms={
+                      caps.hasPermissions
+                        ? (entry.permissionsDisplay ?? "")
+                        : undefined
+                    }
                     className="w-24 font-mono text-[length:var(--text-xs)] text-text-muted shrink-0 tracking-tight whitespace-nowrap"
                   >
                     {caps.hasPermissions
