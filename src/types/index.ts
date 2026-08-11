@@ -75,4 +75,11 @@ export type {
   ToolsExecOutput,
   ToolsError,
   ToolsToolId,
+  DockerAvailability,
+  DockerContainer,
+  DockerImage,
+  DockerStat,
+  DockerContainerAction,
+  DockerActionResponse,
+  DockerLogFrame,
 } from "./tools";

@@ -427,6 +427,45 @@ impl SshManager {
         Ok(new_id)
     }
 
+    /// Like [`Self::split_session`] but the new PTY immediately runs `command`
+    /// instead of a login shell (e.g. `docker exec -it <id> sh`).
+    pub async fn split_session_command(
+        &self,
+        source_session_id: &str,
+        command: String,
+        app_handle: AppHandle,
+    ) -> Result<SessionId, SshError> {
+        let (handle, host_config, jump_handles) = {
+            let entry = self
+                .sessions
+                .get(source_session_id)
+                .ok_or_else(|| SshError::SessionNotFound(source_session_id.to_string()))?;
+            (
+                entry.value().ssh_handle(),
+                entry.value().host_config(),
+                entry.value().jump_handles(),
+            )
+        };
+
+        let new_id = SessionId::new();
+        let sid = new_id.0.clone();
+
+        let session = SshSession::open_split_exec(
+            handle,
+            jump_handles,
+            sid.clone(),
+            80,
+            24,
+            app_handle,
+            host_config.default_shell,
+            command,
+        )
+        .await?;
+
+        self.sessions.insert(sid, session);
+        Ok(new_id)
+    }
+
     /// Send bytes to a session's PTY channel.
     pub async fn send_input(&self, session_id: &str, data: &[u8]) -> Result<(), SshError> {
         let entry = self

@@ -6,14 +6,14 @@
 //! - [`exec`]: SSH exec primitives (`ssh_exec` / `ssh_exec_ok` / `ssh_exec_str`).
 //! - [`commands`]: Tauri commands exposed to the frontend.
 //! - [`system`]: System Overview + Process + Service Manager (Phase 1).
-//! - [`docker`], [`network`], [`security`]: stubs for later phases.
+//! - [`docker`]: Docker management (Phase 2).
+//! - [`network`], [`security`]: stubs for later phases.
 
 pub mod commands;
+pub mod docker;
 pub mod exec;
 pub mod system;
 
-#[allow(dead_code)]
-pub mod docker;
 #[allow(dead_code)]
 pub mod network;
 #[allow(dead_code)]
@@ -28,6 +28,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Default)]
 pub struct ToolsManager {
     cache: DashMap<String, CachedResult>,
+    /// Cancellation tokens for in-flight streaming commands (`docker logs -f`).
+    /// Keyed by stream id so the frontend can stop a follow without a session
+    /// teardown. Tokens are created lazily on first use.
+    stream_cancel: DashMap<String, tokio_util::sync::CancellationToken>,
 }
 
 struct CachedResult {
@@ -67,6 +71,34 @@ impl ToolsManager {
         let prefix = format!("{session_id}:");
         self.cache
             .retain(|k, _| !k.starts_with(&prefix));
+        // Cancel any in-flight `docker logs -f` streams for this session.
+        self.stream_cancel.retain(|k, token| {
+            if k.starts_with(&format!("{session_id}:")) {
+                token.cancel();
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    /// Get or create the cancellation token for a streaming command.
+    pub fn stream_token(&self, stream_id: &str) -> tokio_util::sync::CancellationToken {
+        match self.stream_cancel.get(stream_id) {
+            Some(t) => t.clone(),
+            None => {
+                let token = tokio_util::sync::CancellationToken::new();
+                self.stream_cancel.insert(stream_id.to_string(), token.clone());
+                token
+            }
+        }
+    }
+
+    /// Cancel and forget a streaming command (`docker_logs_stop`).
+    pub fn stream_stop(&self, stream_id: &str) {
+        if let Some((_, t)) = self.stream_cancel.remove(stream_id) {
+            t.cancel();
+        }
     }
 }
 

@@ -74,26 +74,25 @@ Semua tools berjalan **melalui existing SSH session** — tidak ada koneksi baru
 
 ---
 
-## Phase 2 — Docker Tools
+## Phase 2 — Docker Tools ✅ (implemented)
 
 > `src-tauri/src/tools/docker.rs` + frontend `DockerPanel`.
 
-### Milestone 2.1 — Docker detect & list
+### Milestone 2.1 — Docker detect & list ✅
 - `docker_available()`: `docker version --format '{{.Server.Version}}'`; deteksi permission error.
 - `docker_containers(all?) -> Vec<DockerContainer>`: `docker ps -a --format json` (line-per-container, parse JSON).
 - `docker_images()`: `docker images --format json`.
 
-### Milestone 2.2 — Resource usage & actions
+### Milestone 2.2 — Resource usage & actions ✅
 - `docker_stats()`: `docker stats --no-stream --format json`.
 - `docker_container_action(id, action: start|stop|restart|remove)`.
 - Handle permission + feedback jelas.
 
-### Milestone 2.3 — Logs viewer (follow mode)
-- `docker_logs(container, follow, tail)` → streaming event `tools:log-output` (pola `ssh:output`), atau non-follow return penuh.
-- Frontend: LogViewer dengan follow toggle + stop.
+### Milestone 2.3 — Logs viewer (follow mode) ✅
+- `docker_logs_follow(container, tail)` → streaming event `tools:docker-log`, cancel via `docker_logs_stop`; channel closes with the SSH session.
 
-### Milestone 2.4 — Exec shell ke container
-- Buka tab terminal baru dengan `docker exec -it <id> sh` memakai open PTY baru pada session yang sama (pola `split_session`).
+### Milestone 2.4 — Exec shell ke container ✅
+- `ssh_split_exec` membuka PTY baru pada session yang sama untuk `docker exec -it <id> sh` → tab terminal baru.
 
 ---
 

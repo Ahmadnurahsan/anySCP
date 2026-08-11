@@ -61,6 +61,67 @@ export interface ServiceInfo {
   sub: string;
 }
 
+// ─── Docker (Phase 2) ────────────────────────────────────────────────────
+
+export interface DockerAvailability {
+  present: boolean;
+  daemon: boolean;
+  client_version: string | null;
+  server_version: string | null;
+  needs_sudo: boolean;
+  message: string;
+}
+
+export interface DockerContainer {
+  id: string;
+  names: string;
+  image: string;
+  status: string;
+  state: string;
+  ports: string;
+  created_at: string;
+}
+
+export interface DockerImage {
+  id: string;
+  repository: string;
+  tag: string;
+  size: string;
+  created_at: string;
+}
+
+export interface DockerStat {
+  container: string;
+  name: string;
+  cpu_pct: number;
+  mem_use: string;
+  mem_pct: number;
+  net_io: string;
+  block_io: string;
+  pid_count: number;
+}
+
+export type DockerContainerAction =
+  | "start"
+  | "stop"
+  | "restart"
+  | "remove";
+
+export interface DockerActionResponse {
+  container: string;
+  action: DockerContainerAction;
+  ok: boolean;
+  needs_sudo: boolean;
+  message: string;
+}
+
+export interface DockerLogFrame {
+  stream_id: string;
+  data: string;
+  done: boolean;
+  error: string | null;
+}
+
 export interface ServiceResult {
   unit: string;
   action: ServiceAction;

@@ -8,6 +8,13 @@ import type {
   ServiceResult,
   KillResult,
   ToolsToolId,
+  DockerAvailability,
+  DockerContainer,
+  DockerImage,
+  DockerStat,
+  DockerContainerAction,
+  DockerActionResponse,
+  DockerLogFrame,
 } from "../types";
 
 export interface ToolsSession {
@@ -23,6 +30,19 @@ export interface ToolsSession {
   services: ServiceInfo[];
   serviceLoading: boolean;
   error: string | null;
+  // ── Docker ──
+  docker: DockerAvailability | null;
+  dockerLoading: boolean;
+  containers: DockerContainer[];
+  containersLoading: boolean;
+  showAll: boolean;
+  images: DockerImage[];
+  imagesLoading: boolean;
+  stats: DockerStat[];
+  statsLoading: boolean;
+  /** Active log streams: container short-id → accumulated text + liveness. */
+  dockerLogs: Record<string, { lines: string; live: boolean }>;
+  dockerLogError: string | null;
 }
 
 interface ToolsState {
@@ -53,6 +73,22 @@ interface ToolsState {
     unit: string,
     action: ServiceAction,
   ) => Promise<ServiceResult>;
+
+  // ── Docker ──
+  loadDockerAvailability: (toolsSessionId: string) => Promise<DockerAvailability | null>;
+  refreshContainers: (toolsSessionId: string, force?: boolean) => Promise<void>;
+  toggleShowAll: (toolsSessionId: string) => void;
+  refreshDockerImages: (toolsSessionId: string, force?: boolean) => Promise<void>;
+  refreshDockerStats: (toolsSessionId: string, force?: boolean) => Promise<void>;
+  dockerContainerAction: (
+    toolsSessionId: string,
+    container: string,
+    action: DockerContainerAction,
+  ) => Promise<DockerActionResponse>;
+  dockerExecShell: (toolsSessionId: string, container: string) => Promise<string | null>;
+  openLogs: (toolsSessionId: string, container: string, tail: number) => Promise<void>;
+  closeLogs: (toolsSessionId: string, container: string) => void;
+  appendLogFrame: (frame: DockerLogFrame) => void;
 }
 
 function msg(err: unknown): string {
@@ -60,6 +96,9 @@ function msg(err: unknown): string {
     ? String((err as { message: string }).message)
     : "Tools error";
 }
+
+/** Stream ids (`<sessionId>:<container>`) with an active `docker logs -f`. */
+const activeLogStreams = new Set<string>();
 
 export const useToolsStore = create<ToolsState>((set, get) => ({
   sessions: new Map(),
@@ -81,6 +120,17 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
         services: [],
         serviceLoading: false,
         error: null,
+        docker: null,
+        dockerLoading: false,
+        containers: [],
+        containersLoading: false,
+        showAll: false,
+        images: [],
+        imagesLoading: false,
+        stats: [],
+        statsLoading: false,
+        dockerLogs: {},
+        dockerLogError: null,
       });
       return { sessions: next, activeToolsSessionId: sshSessionId };
     }),
@@ -89,6 +139,17 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
     set((state) => {
       const next = new Map(state.sessions);
       next.delete(toolsSessionId);
+      // Kill any in-flight `docker logs -f` streams for this session so the
+      // backend token doesn't leak.
+      const stopped = Array.from(activeLogStreams).filter((s) =>
+        s.startsWith(`${toolsSessionId}:`),
+      );
+      stopped.forEach((s) => activeLogStreams.delete(s));
+      if (stopped.length > 0) {
+        void import("@tauri-apps/api/core").then(({ invoke }) => {
+          stopped.forEach((s) => void invoke("docker_logs_stop", { streamId: s }));
+        });
+      }
       const newActive =
         state.activeToolsSessionId === toolsSessionId
           ? (next.keys().next().value ?? null)
@@ -219,6 +280,203 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
       sessionId: toolsSessionId,
       unit,
       action,
+    });
+  },
+
+  // ── Docker ──
+
+  loadDockerAvailability: async (toolsSessionId) => {
+    const s = get().sessions.get(toolsSessionId);
+    if (s?.docker) return s.docker;
+    if (s?.dockerLoading) return s.docker;
+    set((state) => patch(state, toolsSessionId, { dockerLoading: true }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const docker = await invoke<DockerAvailability>("docker_available", {
+        sessionId: toolsSessionId,
+      });
+      set((state) => patch(state, toolsSessionId, { docker, dockerLoading: false }));
+      return docker;
+    } catch (err) {
+      set((state) =>
+        patch(state, toolsSessionId, { dockerLoading: false, error: msg(err) }),
+      );
+      return null;
+    }
+  },
+
+  refreshContainers: async (toolsSessionId, force = false) => {
+    const s = get().sessions.get(toolsSessionId);
+    if (!s) return;
+    if (s.containersLoading) return;
+    set((state) => patch(state, toolsSessionId, { containersLoading: true }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const containers = await invoke<DockerContainer[]>("docker_containers", {
+        sessionId: toolsSessionId,
+        all: s.showAll,
+        refresh: force,
+      });
+      set((state) =>
+        patch(state, toolsSessionId, { containers, containersLoading: false }),
+      );
+    } catch (err) {
+      set((state) =>
+        patch(state, toolsSessionId, {
+          containersLoading: false,
+          error: msg(err),
+        }),
+      );
+    }
+  },
+
+  toggleShowAll: (toolsSessionId) => {
+    const s = get().sessions.get(toolsSessionId);
+    if (!s) return;
+    const showAll = !s.showAll;
+    set((state) => patch(state, toolsSessionId, { showAll }));
+    void get().refreshContainers(toolsSessionId, true);
+  },
+
+  refreshDockerImages: async (toolsSessionId, force = false) => {
+    const s = get().sessions.get(toolsSessionId);
+    if (!s) return;
+    if (s.imagesLoading) return;
+    set((state) => patch(state, toolsSessionId, { imagesLoading: true }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const images = await invoke<DockerImage[]>("docker_images", {
+        sessionId: toolsSessionId,
+        refresh: force,
+      });
+      set((state) =>
+        patch(state, toolsSessionId, { images, imagesLoading: false }),
+      );
+    } catch (err) {
+      set((state) => patch(state, toolsSessionId, { imagesLoading: false, error: msg(err) }));
+    }
+  },
+
+  refreshDockerStats: async (toolsSessionId, force = false) => {
+    const s = get().sessions.get(toolsSessionId);
+    if (!s) return;
+    if (s.statsLoading) return;
+    set((state) => patch(state, toolsSessionId, { statsLoading: true }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const stats = await invoke<DockerStat[]>("docker_stats", {
+        sessionId: toolsSessionId,
+        refresh: force,
+      });
+      set((state) => patch(state, toolsSessionId, { stats, statsLoading: false }));
+    } catch (err) {
+      set((state) => patch(state, toolsSessionId, { statsLoading: false, error: msg(err) }));
+    }
+  },
+
+  dockerContainerAction: async (toolsSessionId, container, action) => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const res = await invoke<DockerActionResponse>("docker_container_action", {
+      sessionId: toolsSessionId,
+      container,
+      action,
+    });
+    // Refresh the list + stats after a successful action lands.
+    if (res.ok) {
+      await get().refreshContainers(toolsSessionId, true);
+      await get().refreshDockerStats(toolsSessionId, true);
+    }
+    return res;
+  },
+
+  dockerExecShell: async (toolsSessionId, container) => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const { useTabStore } = await import("./tab-store");
+    const { useSessionStore } = await import("./session-store");
+    const s = get().sessions.get(toolsSessionId);
+    if (!s) return null;
+    const name = container.length >= 12 ? container.slice(0, 12) : container;
+    const sessionId = await invoke<string>("ssh_split_exec", {
+      sourceSessionId: toolsSessionId,
+      command: `docker exec -it ${name} sh -c 'exec ${s.hostConfig.default_shell ?? "sh"};' 2>&1 || docker exec -it ${name} sh`,
+    });
+    useSessionStore.getState().addSession(sessionId, {
+      host: s.hostConfig.host,
+      port: s.hostConfig.port,
+      username: s.hostConfig.username,
+      label: s.hostConfig.label || undefined,
+      auth_method: s.hostConfig.auth_method,
+    });
+    useTabStore.getState().addTab({
+      type: "terminal",
+      id: sessionId,
+      label: `${name} · docker`,
+    });
+    return sessionId;
+  },
+
+  openLogs: async (toolsSessionId, container, tail) => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const { listen } = await import("@tauri-apps/api/event");
+    const raw = container.length >= 12 ? container.slice(0, 12) : container;
+    const logStreamId = `${toolsSessionId}:${raw}`;
+    activeLogStreams.add(logStreamId);
+    const unlisten = await listen<DockerLogFrame>("tools:docker-log", (ev) => {
+      const f = ev.payload;
+      if (f.stream_id === logStreamId) {
+        get().appendLogFrame(f);
+        if (f.done) {
+          unlisten();
+          activeLogStreams.delete(logStreamId);
+        }
+      }
+    });
+    try {
+      await invoke<string>("docker_logs_follow", {
+        sessionId: toolsSessionId,
+        container: raw,
+        tail,
+      });
+    } catch (err) {
+      unlisten();
+      activeLogStreams.delete(logStreamId);
+      const s = get().sessions.get(toolsSessionId);
+      if (s) {
+        set((state) => patch(state, toolsSessionId, { dockerLogError: msg(err) }));
+      }
+    }
+  },
+
+  closeLogs: (toolsSessionId, container) => {
+    const streamId = `${toolsSessionId}:${container.slice(0, 12)}`;
+    activeLogStreams.delete(streamId);
+    void import("@tauri-apps/api/core").then(({ invoke }) => {
+      void invoke("docker_logs_stop", { streamId });
+    });
+    const s = get().sessions.get(toolsSessionId);
+    if (s) {
+      set((state) => patch(state, toolsSessionId, { dockerLogs: {}, dockerLogError: null }));
+    }
+  },
+
+  appendLogFrame: (frame) => {
+    const sep = frame.stream_id.indexOf(":");
+    if (sep < 0) return;
+    const toolsSessionId = frame.stream_id.slice(0, sep);
+    const container = frame.stream_id.slice(sep + 1);
+    set((state) => {
+      const s = state.sessions.get(toolsSessionId);
+      if (!s) return state;
+      const existing = s.dockerLogs[container] ?? { lines: "", live: false };
+      const lines = frame.done
+        ? existing.lines
+        : existing.lines + frame.data;
+      return patch(state, toolsSessionId, {
+        dockerLogs: {
+          ...s.dockerLogs,
+          [container]: { lines, live: !frame.done },
+        },
+      });
     });
   },
 }));

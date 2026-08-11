@@ -102,6 +102,28 @@ pub async fn ssh_split_session(
     result
 }
 
+/// Open a new PTY on an existing connection that immediately runs a specific
+/// command instead of a login shell (used for `docker exec -it <id> sh`).
+/// Returns a new session ID backed by a new channel on the same connection.
+#[tauri::command]
+pub async fn ssh_split_exec(
+    source_session_id: String,
+    command: String,
+    state: State<'_, SshManager>,
+    app_handle: AppHandle,
+) -> Result<SessionId, SshError> {
+    if command.is_empty() || command.len() > 4096 {
+        return Err(SshError::IoError("invalid command".to_string()));
+    }
+    let result = state
+        .split_session_command(&source_session_id, command, app_handle)
+        .await;
+    if result.is_ok() {
+        crate::telemetry::capture("ssh_split_exec", serde_json::json!({}));
+    }
+    result
+}
+
 /// Scan `~/.ssh/` for private key files and return metadata for each one.
 #[tauri::command]
 pub async fn list_ssh_keys() -> Result<Vec<SshKeyInfo>, SshError> {

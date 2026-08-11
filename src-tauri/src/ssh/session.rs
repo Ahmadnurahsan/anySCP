@@ -179,7 +179,6 @@ impl SshSession {
 
     /// Open a new PTY channel on the same authenticated connection.
     /// Used for split panes — avoids re-authentication.
-    #[allow(clippy::too_many_arguments)]
     pub async fn open_split_pty(
         handle: Arc<Mutex<Handle<SshClientHandler>>>,
         jump_handles: Arc<Vec<Handle<SshClientHandler>>>,
@@ -188,6 +187,57 @@ impl SshSession {
         rows: u32,
         app_handle: AppHandle,
         default_shell: Option<String>,
+    ) -> Result<Self, SshError> {
+        Self::open_split_pty_inner(
+            handle,
+            jump_handles,
+            session_id,
+            cols,
+            rows,
+            app_handle,
+            default_shell,
+            None,
+        )
+        .await
+    }
+
+    /// Like [`Self::open_split_pty`], but runs `command` directly on the new
+    /// channel instead of starting a login shell. Used by the tools layer for
+    /// `docker exec -it <id> sh` — the terminal input stream still works the
+    /// same way.
+    pub async fn open_split_exec(
+        handle: Arc<Mutex<Handle<SshClientHandler>>>,
+        jump_handles: Arc<Vec<Handle<SshClientHandler>>>,
+        session_id: String,
+        cols: u32,
+        rows: u32,
+        app_handle: AppHandle,
+        default_shell: Option<String>,
+        command: String,
+    ) -> Result<Self, SshError> {
+        Self::open_split_pty_inner(
+            handle,
+            jump_handles,
+            session_id,
+            cols,
+            rows,
+            app_handle,
+            default_shell,
+            Some(command),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn open_split_pty_inner(
+        handle: Arc<Mutex<Handle<SshClientHandler>>>,
+        jump_handles: Arc<Vec<Handle<SshClientHandler>>>,
+        session_id: String,
+        cols: u32,
+        rows: u32,
+        app_handle: AppHandle,
+        default_shell: Option<String>,
+        command: Option<String>,
     ) -> Result<Self, SshError> {
         let channel = handle
             .lock()
@@ -201,7 +251,12 @@ impl SshSession {
             .await
             .map_err(|e| SshError::ChannelError(e.to_string()))?;
 
-        if let Some(shell) = &default_shell {
+        if let Some(cmd) = &command {
+            channel
+                .exec(false, cmd.as_bytes())
+                .await
+                .map_err(|e| SshError::ChannelError(e.to_string()))?;
+        } else if let Some(shell) = &default_shell {
             channel
                 .exec(false, shell.as_bytes())
                 .await

@@ -238,6 +238,7 @@ pub fn run() {
             ssh::commands::ssh_connect,
             ssh::commands::ssh_cancel_connect,
             ssh::commands::ssh_split_session,
+            ssh::commands::ssh_split_exec,
             ssh::commands::ssh_disconnect,
             ssh::commands::ssh_send_input,
             ssh::commands::ssh_resize_pty,
@@ -341,6 +342,14 @@ pub fn run() {
             tools::system::service_available,
             tools::system::service_list,
             tools::system::service_control,
+            tools::docker::docker_available,
+            tools::docker::docker_containers,
+            tools::docker::docker_images,
+            tools::docker::docker_stats,
+            tools::docker::docker_container_action,
+            tools::docker::docker_logs,
+            tools::docker::docker_logs_follow,
+            tools::docker::docker_logs_stop,
             // Build info
             is_release_build,
         ])
