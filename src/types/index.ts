@@ -82,4 +82,11 @@ export type {
   DockerContainerAction,
   DockerActionResponse,
   DockerLogFrame,
+  NetworkToolsAvailability,
+  PortResult,
+  PortScanResponse,
+  PingResult,
+  PingResponse,
+  TracerouteHop,
+  TracerouteResponse,
 } from "./tools";

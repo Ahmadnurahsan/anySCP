@@ -15,6 +15,10 @@ import type {
   DockerContainerAction,
   DockerActionResponse,
   DockerLogFrame,
+  NetworkToolsAvailability,
+  PortScanResponse,
+  PingResponse,
+  TracerouteResponse,
 } from "../types";
 
 export interface ToolsSession {
@@ -43,6 +47,13 @@ export interface ToolsSession {
   /** Active log streams: container short-id → accumulated text + liveness. */
   dockerLogs: Record<string, { lines: string; live: boolean }>;
   dockerLogError: string | null;
+  // ── Network ──
+  netAvailable: NetworkToolsAvailability | null;
+  netLoading: boolean;
+  lastScan: PortScanResponse | null;
+  lastPing: PingResponse | null;
+  lastTrace: TracerouteResponse | null;
+  netError: string | null;
 }
 
 interface ToolsState {
@@ -89,6 +100,17 @@ interface ToolsState {
   openLogs: (toolsSessionId: string, container: string, tail: number) => Promise<void>;
   closeLogs: (toolsSessionId: string, container: string) => void;
   appendLogFrame: (frame: DockerLogFrame) => void;
+
+  // ── Network ──
+  loadNetworkAvailability: (toolsSessionId: string) => Promise<NetworkToolsAvailability | null>;
+  runPortScan: (
+    toolsSessionId: string,
+    target: string,
+    ports: string,
+    strategy: string,
+  ) => Promise<PortScanResponse | null>;
+  runPing: (toolsSessionId: string, target: string, count: number) => Promise<PingResponse | null>;
+  runTraceroute: (toolsSessionId: string, target: string) => Promise<TracerouteResponse | null>;
 }
 
 function msg(err: unknown): string {
@@ -131,6 +153,12 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
         statsLoading: false,
         dockerLogs: {},
         dockerLogError: null,
+        netAvailable: null,
+        netLoading: false,
+        lastScan: null,
+        lastPing: null,
+        lastTrace: null,
+        netError: null,
       });
       return { sessions: next, activeToolsSessionId: sshSessionId };
     }),
@@ -478,6 +506,76 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
         },
       });
     });
+  },
+
+  // ── Network ──
+
+  loadNetworkAvailability: async (toolsSessionId) => {
+    const s = get().sessions.get(toolsSessionId);
+    if (s?.netAvailable || s?.netLoading) return s?.netAvailable ?? null;
+    set((state) => patch(state, toolsSessionId, { netLoading: true }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const a = await invoke<NetworkToolsAvailability>("network_tools_available", {
+        sessionId: toolsSessionId,
+      });
+      set((state) => patch(state, toolsSessionId, { netAvailable: a, netLoading: false }));
+      return a;
+    } catch (err) {
+      set((state) => patch(state, toolsSessionId, { netLoading: false, netError: msg(err) }));
+      return null;
+    }
+  },
+
+  runPortScan: async (toolsSessionId, target, ports, strategy) => {
+    set((state) => patch(state, toolsSessionId, { netError: null }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const res = await invoke<PortScanResponse>("port_scan", {
+        sessionId: toolsSessionId,
+        target,
+        ports,
+        strategy,
+      });
+      set((state) => patch(state, toolsSessionId, { lastScan: res, netError: res.error }));
+      return res;
+    } catch (err) {
+      set((state) => patch(state, toolsSessionId, { netError: msg(err) }));
+      return null;
+    }
+  },
+
+  runPing: async (toolsSessionId, target, count) => {
+    set((state) => patch(state, toolsSessionId, { netError: null }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const res = await invoke<PingResponse>("ping_check", {
+        sessionId: toolsSessionId,
+        target,
+        count,
+      });
+      set((state) => patch(state, toolsSessionId, { lastPing: res, netError: res.error }));
+      return res;
+    } catch (err) {
+      set((state) => patch(state, toolsSessionId, { netError: msg(err) }));
+      return null;
+    }
+  },
+
+  runTraceroute: async (toolsSessionId, target) => {
+    set((state) => patch(state, toolsSessionId, { netError: null }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const res = await invoke<TracerouteResponse>("traceroute_check", {
+        sessionId: toolsSessionId,
+        target,
+      });
+      set((state) => patch(state, toolsSessionId, { lastTrace: res, netError: res.error }));
+      return res;
+    } catch (err) {
+      set((state) => patch(state, toolsSessionId, { netError: msg(err) }));
+      return null;
+    }
   },
 }));
 

@@ -7,15 +7,15 @@
 //! - [`commands`]: Tauri commands exposed to the frontend.
 //! - [`system`]: System Overview + Process + Service Manager (Phase 1).
 //! - [`docker`]: Docker management (Phase 2).
-//! - [`network`], [`security`]: stubs for later phases.
+//! - [`network`]: Port scan, ping, traceroute (Phase 3).
+//! - [`security`]: stub for Phase 4.
 
 pub mod commands;
 pub mod docker;
 pub mod exec;
+pub mod network;
 pub mod system;
 
-#[allow(dead_code)]
-pub mod network;
 #[allow(dead_code)]
 pub mod security;
 

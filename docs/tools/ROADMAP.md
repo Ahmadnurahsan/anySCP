@@ -96,22 +96,23 @@ Semua tools berjalan **melalui existing SSH session** — tidak ada koneksi baru
 
 ---
 
-## Phase 3 — Network Tools
+## Phase 3 — Network Tools ✅ (implemented)
 
 > `src-tauri/src/tools/network.rs` + frontend `NetworkPanel`.
 
-### Milestone 3.1 — Port Scanner
-- Deteksi `nmap` di remote; kalau ada pakai `nmap -sS -p <range> host`; fallback `nc -zvw` per port / `ss -tuln` untuk listening lokal.
-- Opsi scan: common ports preset + custom range.
+### Milestone 3.1 — Port Scanner ✅
+- Deteksi `nmap` di remote; kalau ada pakai `nmap -sT -Pn -p <range> host` (connect scan, tanpa root); fallback `nc -z -w 1` per port (sequential, bounded ≤200 port).
+- Opsi scan: common ports preset + custom range (parsing `22,80,443` / `1-1000`).
 - `port_scan(target, range, strategy) -> Vec<PortResult>`.
-- Hasil bisa disimpan per host (SQLite `tool_scan_results` table migration).
 
-### Milestone 3.2 — Service Detection
-- Identifikasi service dari port: `ss -tulpn` / `lsof -i` (kalau priv), banner grab `nc -w 2` bila aman.
-- Map port→service umum. Balance antara akurasi & jumlah command.
+### Milestone 3.2 — Service Detection ✅
+- Nama service dari kolom nmap, atau map offline port→service untuk fallback `nc`.
 
-### Milestone 3.3 — Ping / Traceroute
-- `ping_check(target)` `ping -c 4`, `traceroute`.
+### Milestone 3.3 — Ping / Traceroute ✅
+- `ping_check(target)` `ping -c N -W 2` → loss%, RTT min/avg/max, reply list.
+- `traceroute_check(target)` `traceroute -n -m 15 -w 1` → hop table.
+
+> SQLite persistence of scan results (`tool_scan_results`) ditunda — in-memory hasil scan terakhir di store.
 
 ---
 

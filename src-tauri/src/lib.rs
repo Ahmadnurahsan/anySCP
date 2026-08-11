@@ -350,6 +350,10 @@ pub fn run() {
             tools::docker::docker_logs,
             tools::docker::docker_logs_follow,
             tools::docker::docker_logs_stop,
+            tools::network::network_tools_available,
+            tools::network::port_scan,
+            tools::network::ping_check,
+            tools::network::traceroute_check,
             // Build info
             is_release_build,
         ])

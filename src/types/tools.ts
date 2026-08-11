@@ -122,6 +122,62 @@ export interface DockerLogFrame {
   error: string | null;
 }
 
+// ─── Network (Phase 3) ────────────────────────────────────────────────────
+
+export interface NetworkToolsAvailability {
+  nmap: boolean;
+  nc: boolean;
+  ping: boolean;
+  traceroute: boolean;
+  ss: boolean;
+  can_scan: boolean;
+  message: string;
+}
+
+export interface PortResult {
+  port: number;
+  state: string;
+  service: string;
+}
+
+export interface PortScanResponse {
+  target: string;
+  strategy: string;
+  ports: PortResult[];
+  duration_ms: number;
+  error: string | null;
+}
+
+export interface PingResult {
+  seq: number;
+  time_ms: number | null;
+  ttl: number | null;
+}
+
+export interface PingResponse {
+  target: string;
+  transmitted: number;
+  received: number;
+  loss_pct: number;
+  rtt_min: number | null;
+  rtt_avg: number | null;
+  rtt_max: number | null;
+  replies: PingResult[];
+  error: string | null;
+}
+
+export interface TracerouteHop {
+  hop: number;
+  host: string;
+  rtts: (number | null)[];
+}
+
+export interface TracerouteResponse {
+  target: string;
+  hops: TracerouteHop[];
+  error: string | null;
+}
+
 export interface ServiceResult {
   unit: string;
   action: ServiceAction;
