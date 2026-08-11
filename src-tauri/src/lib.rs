@@ -9,6 +9,7 @@ mod scp;
 mod sftp;
 mod snippets;
 mod ssh;
+mod tools;
 pub mod telemetry;
 pub mod transfer_common;
 mod types;
@@ -25,6 +26,7 @@ use sftp::SftpManager;
 use ssh::manager::SshManager;
 use std::sync::Arc;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tools::ToolsManager;
 
 /// Whether this is a real release build — i.e. a packaged binary that can
 /// safely self-update via the updater plugin.
@@ -176,6 +178,7 @@ pub fn run() {
             Ok(())
         })
         .manage(SshManager::new())
+        .manage(Arc::new(ToolsManager::new()))
         .invoke_handler(tauri::generate_handler![
             // SFTP — session & filesystem
             sftp::commands::sftp_open,
@@ -329,6 +332,15 @@ pub fn run() {
             snippets::commands::list_snippet_folders,
             snippets::commands::delete_snippet_folder,
             snippets::commands::snippet_execute,
+            // Tools
+            tools::commands::tools_exec,
+            tools::commands::tools_exec_batch,
+            tools::system::system_overview,
+            tools::system::process_list,
+            tools::system::process_kill,
+            tools::system::service_available,
+            tools::system::service_list,
+            tools::system::service_control,
             // Build info
             is_release_build,
         ])

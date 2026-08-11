@@ -63,3 +63,16 @@ export type {
   ProviderCapabilities,
   FileSystemProvider,
 } from "./explorer";
+
+export type {
+  SystemOverview,
+  DiskInfo,
+  ProcessInfo,
+  KillResult,
+  ServiceAction,
+  ServiceInfo,
+  ServiceResult,
+  ToolsExecOutput,
+  ToolsError,
+  ToolsToolId,
+} from "./tools";

@@ -367,6 +367,47 @@ export function HostsDashboard() {
 
   // ─── Host action handlers ──────────────────────────────────────────────────
 
+  // Tools: open the system/process/service toolkit on a bare SSH connection
+  // (no terminal pane is needed — the Tools tab owns its session).
+  const openToolsHost = useCallback(
+    async (host: SavedHost) => {
+      const label = host.label || `${host.username}@${host.host}`;
+      const attemptId = crypto.randomUUID();
+      let cancelled = false;
+      const cancel = () => {
+        cancelled = true;
+        void cancelConnectAttempt(attemptId);
+        setConnectingHost(null);
+      };
+      setConnectingHost({ label, error: null, retry: () => void openToolsHost(host), cancel });
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const sessionId = await invoke<string>("connect_saved_host_no_pty", { hostId: host.id, attemptId });
+        if (cancelled) {
+          void invoke("ssh_disconnect", { sessionId });
+          return;
+        }
+        const { useToolsStore } = await import("../../stores/tools-store");
+        useToolsStore.getState().openSession(sessionId, label, {
+          host: host.host,
+          port: host.port,
+          username: host.username,
+          auth_method: { type: "password", password: "" },
+        });
+        void useHostsStore.getState().recordConnection(host.id);
+        setConnectingHost(null);
+        useTabStore.getState().addTab({ type: "tools", id: sessionId, label });
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err && typeof err === "object" && "message" in err
+          ? String((err as { message: string }).message)
+          : "Connection failed.";
+        setConnectingHost({ label, error: msg, retry: () => void openToolsHost(host), cancel: null });
+      }
+    },
+    [],
+  );
+
   const handleDeleteHost = useCallback(
     async (id: string) => {
       await deleteHost(id);
@@ -740,6 +781,7 @@ export function HostsDashboard() {
                         <HostCard
                           host={host}
                           onConnect={(h) => void connectToHost(h)}
+                          onTools={(h) => void openToolsHost(h)}
                           onExplore={(h) => void exploreHost(h)}
                           onEdit={setEditingHostId}
                           onDelete={(id) => void handleDeleteHost(id)}

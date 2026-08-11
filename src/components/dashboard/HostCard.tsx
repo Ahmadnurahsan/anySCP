@@ -19,6 +19,7 @@ function statusColor(status: HealthStatus): string {
 interface HostCardProps {
   host: SavedHost;
   onConnect: (host: SavedHost) => void;
+  onTools: (host: SavedHost) => void;
   onExplore: (host: SavedHost) => void;
   onEdit: (hostId: string) => void;
   onDelete: (hostId: string) => void;
@@ -68,7 +69,7 @@ function isEnvironmentValue(val: string): val is EnvironmentValue {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function HostCard({ host, onConnect, onExplore, onEdit, onDelete, onDuplicate }: HostCardProps) {
+export function HostCard({ host, onConnect, onTools, onExplore, onEdit, onDelete, onDuplicate }: HostCardProps) {
   const displayName = host.label || host.host;
   const avatarColor = host.color || getHostColor(host.host);
   const initial = displayName.charAt(0).toUpperCase();
@@ -122,6 +123,11 @@ export function HostCard({ host, onConnect, onExplore, onEdit, onDelete, onDupli
       label: "Terminal",
       icon: TerminalSquare,
       onClick: () => onConnect(host),
+    },
+    {
+      label: "Tools",
+      icon: Activity,
+      onClick: () => onTools(host),
     },
     {
       label: "Explorer",
@@ -215,6 +221,13 @@ export function HostCard({ host, onConnect, onExplore, onEdit, onDelete, onDupli
             onClick={() => onConnect(host)}
             ariaLabel={`Open terminal for ${displayName}`}
             testId={`host-card-${host.id}-terminal`}
+          />
+          <CardActionButton
+            icon={Activity}
+            label="Tools"
+            onClick={() => onTools(host)}
+            ariaLabel={`Open tools for ${displayName}`}
+            testId={`host-card-${host.id}-tools`}
           />
           <CardActionButton
             icon={FolderOpen}

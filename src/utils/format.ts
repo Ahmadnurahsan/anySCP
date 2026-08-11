@@ -34,6 +34,26 @@ export function formatEta(secs: number | null): string {
 import type { TransferStatusValue } from "../types";
 
 /**
+ * Format a duration in seconds to a human-readable string.
+ * Examples: 45 → "45s", 90 → "1m 30s", 3700 → "1h 1m"
+ */
+export function formatDuration(secs: number): string {
+  if (secs < 60) return `${Math.round(secs)}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`;
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h ${m}m`;
+}
+
+/**
+ * Format a percentage with a fixed number of decimals (default 1), trimming a
+ * trailing ".0" so it reads as a whole number when integral.
+ */
+export function formatPct(value: number, decimals = 1): string {
+  return value.toFixed(decimals).replace(/\.0$/, "");
+}
+
+/**
  * Coerce a TransferStatusValue (which may be a tagged union object) into a
  * plain string for display or comparison purposes.
  */

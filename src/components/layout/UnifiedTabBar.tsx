@@ -16,6 +16,7 @@ import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  Activity,
 } from "lucide-react";
 import { useTabStore, type UnifiedTab, type PageId } from "../../stores/tab-store";
 import { useSessionStore, countPanes, getTopDirection } from "../../stores/session-store";
@@ -36,6 +37,7 @@ function getTabIcon(tab: UnifiedTab): React.ElementType {
   if (tab.type === "terminal") return TerminalSquare;
   if (tab.type === "sftp") return FolderOpen;
   if (tab.type === "s3") return Cloud;
+  if (tab.type === "tools") return Activity;
   return PAGE_ICONS[tab.page] ?? Monitor;
 }
 

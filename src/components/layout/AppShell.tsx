@@ -13,6 +13,7 @@ import type { ShortcutDef } from "../../hooks/use-keyboard-shortcuts";
 import { Sidebar } from "../sidebar";
 import { TerminalArea } from "../terminal";
 import { UnifiedTabBar } from "./UnifiedTabBar";
+import { ToolsPage } from "../tools/ToolsPage";
 
 import { HostsDashboard, HostEditModal } from "../dashboard";
 import { NEW_HOST_ID } from "../dashboard/HostEditModal";
@@ -119,7 +120,7 @@ export function AppShell() {
               }
             })();
           } else {
-            // SFTP, S3, or settings — close via UnifiedTabBar handler
+            // SFTP, S3, tools, or settings — close via UnifiedTabBar handler
             // Simulated close: removeTab triggers fallback
             void (async () => {
               const { invoke } = await import("@tauri-apps/api/core");
@@ -140,6 +141,9 @@ export function AppShell() {
                 }
                 const { useS3Store } = await import("../../stores/s3-store");
                 useS3Store.getState().closeSession(activeTabId);
+              } else if (tab.type === "tools") {
+                const { useToolsStore } = await import("../../stores/tools-store");
+                useToolsStore.getState().closeSession(activeTabId);
               }
               removeTab(activeTabId);
             })();
@@ -455,6 +459,22 @@ export function AppShell() {
                     ) : (
                       <ExplorerPage s3SessionId={tabId} isActive={isVisible} />
                     )}
+                  </div>
+                );
+              })}
+
+            {/* Tools tabs — render ALL tools tabs hidden, toggle visibility, so a
+                tools panel keeps its loaded data across tab switches. */}
+            {Array.from(allTabs.entries())
+              .filter(([, tab]) => tab.type === "tools")
+              .map(([tabId, tab]) => {
+                const isVisible = tabId === activeTabId;
+                return (
+                  <div
+                    key={tabId}
+                    className={`absolute inset-0 ${isVisible ? "z-10 visible" : "z-0 invisible"}`}
+                  >
+                    <ToolsPage sessionId={tabId} label={tab.label} isActive={isVisible} />
                   </div>
                 );
               })}

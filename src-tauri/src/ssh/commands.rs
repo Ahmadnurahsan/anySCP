@@ -56,11 +56,14 @@ pub async fn ssh_cancel_connect(
 pub async fn ssh_disconnect(
     session_id: String,
     state: State<'_, SshManager>,
+    tools: State<'_, Arc<crate::tools::ToolsManager>>,
     app_handle: AppHandle,
 ) -> Result<(), SshError> {
     let result = state.disconnect(&session_id, app_handle).await;
     if result.is_ok() {
         crate::telemetry::capture("ssh_disconnected", serde_json::json!({}));
+        // A recycled session UUID must never serve stale tools data.
+        tools.invalidate(&session_id);
     }
     result
 }
