@@ -1,8 +1,11 @@
 name: Build Windows App
 
+# Hanya nge-build otomatis kalau push ke branch 'release' atau 'main', ATAU di-trigger manual
 on:
   push:
-    branches: [ main, feature/* ]
+    branches: [ release, main ]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
