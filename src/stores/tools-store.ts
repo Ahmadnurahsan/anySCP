@@ -14,8 +14,11 @@ import type {
   DockerStat,
   DockerContainerAction,
   DockerActionResponse,
+  DockerInspectResult,
   DockerLogFrame,
   NetworkToolsAvailability,
+  ListeningPort,
+  DnsLookupResponse,
   PortScanResponse,
   PingResponse,
   TracerouteResponse,
@@ -47,12 +50,21 @@ export interface ToolsSession {
   /** Active log streams: container short-id → accumulated text + liveness. */
   dockerLogs: Record<string, { lines: string; live: boolean }>;
   dockerLogError: string | null;
+  /** docker inspect result, keyed by container id. */
+  dockerInspects: Record<string, DockerInspectResult | null>;
+  dockerInspectLoading: string | null;
+  // ── Service logs ──
+  serviceLogs: Record<string, string>;
+  serviceLogLoading: string | null;
   // ── Network ──
   netAvailable: NetworkToolsAvailability | null;
   netLoading: boolean;
+  listeningPorts: ListeningPort[];
+  listeningPortsLoading: boolean;
   lastScan: PortScanResponse | null;
   lastPing: PingResponse | null;
   lastTrace: TracerouteResponse | null;
+  lastDns: DnsLookupResponse | null;
   netError: string | null;
 }
 
@@ -100,9 +112,14 @@ interface ToolsState {
   openLogs: (toolsSessionId: string, container: string, tail: number) => Promise<void>;
   closeLogs: (toolsSessionId: string, container: string) => void;
   appendLogFrame: (frame: DockerLogFrame) => void;
+  dockerInspect: (toolsSessionId: string, container: string) => Promise<DockerInspectResult | null>;
+  clearInspect: (toolsSessionId: string, container: string) => void;
+  fetchServiceLog: (toolsSessionId: string, unit: string, lines?: number) => Promise<void>;
+  clearServiceLog: (toolsSessionId: string, unit: string) => void;
 
   // ── Network ──
   loadNetworkAvailability: (toolsSessionId: string) => Promise<NetworkToolsAvailability | null>;
+  fetchListeningPorts: (toolsSessionId: string) => Promise<void>;
   runPortScan: (
     toolsSessionId: string,
     target: string,
@@ -111,6 +128,7 @@ interface ToolsState {
   ) => Promise<PortScanResponse | null>;
   runPing: (toolsSessionId: string, target: string, count: number) => Promise<PingResponse | null>;
   runTraceroute: (toolsSessionId: string, target: string) => Promise<TracerouteResponse | null>;
+  runDnsLookup: (toolsSessionId: string, target: string, recordType?: string) => Promise<DnsLookupResponse | null>;
 }
 
 function msg(err: unknown): string {
@@ -153,11 +171,18 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
         statsLoading: false,
         dockerLogs: {},
         dockerLogError: null,
+        dockerInspects: {},
+        dockerInspectLoading: null,
+        serviceLogs: {},
+        serviceLogLoading: null,
         netAvailable: null,
         netLoading: false,
+        listeningPorts: [],
+        listeningPortsLoading: false,
         lastScan: null,
         lastPing: null,
         lastTrace: null,
+        lastDns: null,
         netError: null,
       });
       return { sessions: next, activeToolsSessionId: sshSessionId };
@@ -423,10 +448,11 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
     const { useSessionStore } = await import("./session-store");
     const s = get().sessions.get(toolsSessionId);
     if (!s) return null;
-    const name = container.length >= 12 ? container.slice(0, 12) : container;
+    const containerTarget = container.trim();
+    const labelName = containerTarget.length > 16 ? containerTarget.slice(0, 16) + "…" : containerTarget;
     const sessionId = await invoke<string>("ssh_split_exec", {
       sourceSessionId: toolsSessionId,
-      command: `docker exec -it ${name} sh -c 'exec ${s.hostConfig.default_shell ?? "sh"};' 2>&1 || docker exec -it ${name} sh`,
+      command: `docker exec -it ${containerTarget} /bin/bash 2>/dev/null || docker exec -it ${containerTarget} /bin/sh 2>/dev/null || docker exec -it ${containerTarget} sh`,
     });
     useSessionStore.getState().addSession(sessionId, {
       host: s.hostConfig.host,
@@ -438,7 +464,7 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
     useTabStore.getState().addTab({
       type: "terminal",
       id: sessionId,
-      label: `${name} · docker`,
+      label: `${labelName} · docker`,
     });
     return sessionId;
   },
@@ -508,6 +534,95 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
     });
   },
 
+  // ── Docker Inspect ──
+
+  dockerInspect: async (toolsSessionId, container) => {
+    const s = get().sessions.get(toolsSessionId);
+    if (!s) return null;
+    // Container id might be a 12-char short id or a name — pass it through.
+    set((state) => patch(state, toolsSessionId, { dockerInspectLoading: container }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const result = await invoke<DockerInspectResult>("docker_inspect", {
+        sessionId: toolsSessionId,
+        container,
+      });
+      set((state) =>
+        patch(state, toolsSessionId, {
+          dockerInspectLoading: null,
+          dockerInspects: {
+            ...get().sessions.get(toolsSessionId)?.dockerInspects,
+            [container]: result,
+          },
+        })
+      );
+      return result;
+    } catch (err) {
+      set((state) =>
+        patch(state, toolsSessionId, {
+          dockerInspectLoading: null,
+          dockerInspects: {
+            ...get().sessions.get(toolsSessionId)?.dockerInspects,
+            [container]: null,
+          },
+          error: msg(err),
+        })
+      );
+      return null;
+    }
+  },
+
+  clearInspect: (toolsSessionId, container) => {
+    const s = get().sessions.get(toolsSessionId);
+    if (!s) return;
+    const next = { ...s.dockerInspects };
+    delete next[container];
+    set((state) => patch(state, toolsSessionId, { dockerInspects: next }));
+  },
+
+  // ── Service Logs ──
+
+  fetchServiceLog: async (toolsSessionId, unit, lines = 200) => {
+    const s = get().sessions.get(toolsSessionId);
+    if (!s) return;
+    set((state) => patch(state, toolsSessionId, { serviceLogLoading: unit }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const text = await invoke<string>("service_log", {
+        sessionId: toolsSessionId,
+        unit,
+        lines,
+      });
+      set((state) =>
+        patch(state, toolsSessionId, {
+          serviceLogLoading: null,
+          serviceLogs: {
+            ...get().sessions.get(toolsSessionId)?.serviceLogs,
+            [unit]: text,
+          },
+        })
+      );
+    } catch (err) {
+      set((state) =>
+        patch(state, toolsSessionId, {
+          serviceLogLoading: null,
+          serviceLogs: {
+            ...get().sessions.get(toolsSessionId)?.serviceLogs,
+            [unit]: `Error: ${msg(err)}`,
+          },
+        })
+      );
+    }
+  },
+
+  clearServiceLog: (toolsSessionId, unit) => {
+    const s = get().sessions.get(toolsSessionId);
+    if (!s) return;
+    const next = { ...s.serviceLogs };
+    delete next[unit];
+    set((state) => patch(state, toolsSessionId, { serviceLogs: next }));
+  },
+
   // ── Network ──
 
   loadNetworkAvailability: async (toolsSessionId) => {
@@ -571,6 +686,46 @@ export const useToolsStore = create<ToolsState>((set, get) => ({
         target,
       });
       set((state) => patch(state, toolsSessionId, { lastTrace: res, netError: res.error }));
+      return res;
+    } catch (err) {
+      set((state) => patch(state, toolsSessionId, { netError: msg(err) }));
+      return null;
+    }
+  },
+
+  fetchListeningPorts: async (toolsSessionId) => {
+    set((state) => patch(state, toolsSessionId, { listeningPortsLoading: true }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const ports = await invoke<ListeningPort[]>("listening_ports", {
+        sessionId: toolsSessionId,
+      });
+      set((state) =>
+        patch(state, toolsSessionId, {
+          listeningPorts: ports,
+          listeningPortsLoading: false,
+        })
+      );
+    } catch (err) {
+      set((state) =>
+        patch(state, toolsSessionId, {
+          listeningPortsLoading: false,
+          netError: msg(err),
+        })
+      );
+    }
+  },
+
+  runDnsLookup: async (toolsSessionId, target, recordType = "A") => {
+    set((state) => patch(state, toolsSessionId, { netError: null }));
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const res = await invoke<DnsLookupResponse>("dns_lookup", {
+        sessionId: toolsSessionId,
+        target,
+        recordType,
+      });
+      set((state) => patch(state, toolsSessionId, { lastDns: res, netError: res.error }));
       return res;
     } catch (err) {
       set((state) => patch(state, toolsSessionId, { netError: msg(err) }));

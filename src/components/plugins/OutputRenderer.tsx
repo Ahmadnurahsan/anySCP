@@ -3,6 +3,8 @@ import type { PluginRunResult, PluginTable, Metric } from "../../types";
 
 interface Props {
   result: PluginRunResult;
+  /** Used as filename hint when downloading (e.g. "docker-logs") */
+  label?: string;
 }
 
 /** Generic widget renderer — one widget per `output` kind, no plugin-specific UI. */

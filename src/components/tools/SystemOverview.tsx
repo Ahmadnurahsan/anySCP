@@ -94,6 +94,28 @@ export function SystemOverview({ session }: Props) {
         />
       </div>
 
+      {/* CPU bar */}
+      {ov.cpu_usage_pct != null && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs text-text-muted">
+            <span>CPU</span>
+            <span>{formatPct(ov.cpu_usage_pct)}%</span>
+          </div>
+          <div className="h-2 rounded-full bg-bg-muted overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                ov.cpu_usage_pct >= 90
+                  ? "bg-status-error"
+                  : ov.cpu_usage_pct >= 70
+                    ? "bg-status-connecting"
+                    : "bg-accent/80"
+              }`}
+              style={{ width: `${Math.min(100, ov.cpu_usage_pct)}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Memory bar */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between text-xs text-text-muted">

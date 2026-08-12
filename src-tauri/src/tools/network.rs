@@ -86,6 +86,23 @@ pub struct TracerouteResponse {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ListeningPort {
+    pub proto: String,
+    pub address: String,
+    pub port: u16,
+    pub pid: Option<u32>,
+    pub process: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DnsLookupResponse {
+    pub query: String,
+    pub record_type: String,
+    pub result: String,
+    pub error: Option<String>,
+}
+
 // ─── Availability probe ────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -573,6 +590,124 @@ pub async fn traceroute_check(
         hops,
         error,
     })
+}
+
+/// Return all active listening ports and their processes on the host.
+/// Uses `ss -tulpn` or `netstat -tulpn` under the hood.
+#[tauri::command]
+#[instrument(skip(ssh))]
+pub async fn listening_ports(
+    session_id: String,
+    ssh: State<'_, SshManager>,
+) -> Result<Vec<ListeningPort>, ToolsError> {
+    let cmd = "ss -tulpn --numeric 2>/dev/null || netstat -tulpn 2>/dev/null || true";
+    let handle = ssh.get_handle(&session_id)?;
+    let out = exec::ssh_exec_str_checked(handle, cmd).await?;
+    Ok(parse_listening_ports(&out))
+}
+
+/// Perform DNS lookup (A, AAAA, MX, TXT, CNAME) via `dig` or `nslookup` or `host`.
+#[tauri::command]
+#[instrument(skip(ssh))]
+pub async fn dns_lookup(
+    session_id: String,
+    target: String,
+    record_type: Option<String>,
+    ssh: State<'_, SshManager>,
+) -> Result<DnsLookupResponse, ToolsError> {
+    if target.is_empty()
+        || target.chars().any(|c| !(c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_'))
+    {
+        return Err(ToolsError::ParseError("invalid domain target".into()));
+    }
+    let rtype = record_type.unwrap_or_else(|| "A".to_string()).to_uppercase();
+    let safe_rtype = match rtype.as_str() {
+        "AAAA" | "MX" | "TXT" | "CNAME" | "NS" | "PTR" => rtype.as_str(),
+        _ => "A",
+    };
+    let cmd = format!(
+        "dig +short {safe_rtype} {target} 2>/dev/null \
+         || nslookup -type={safe_rtype} {target} 2>/dev/null \
+         || host -t {safe_rtype} {target} 2>/dev/null || echo '(no lookup tool found)'"
+    );
+    let handle = ssh.get_handle(&session_id)?;
+    let out = exec::ssh_exec_str_checked(handle, &cmd).await?;
+    let trimmed = out.trim().to_string();
+    let err = if trimmed.contains("no lookup tool") || trimmed.is_empty() {
+        Some("Lookup failed or no record found".to_string())
+    } else {
+        None
+    };
+    Ok(DnsLookupResponse {
+        query: target,
+        record_type: safe_rtype.to_string(),
+        result: trimmed,
+        error: err,
+    })
+}
+
+fn parse_listening_ports(out: &str) -> Vec<ListeningPort> {
+    let mut ports = Vec::new();
+    for line in out.lines() {
+        let l = line.trim();
+        if l.starts_with("Netid") || l.starts_with("Active") || l.starts_with("Proto") || l.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = l.split_whitespace().collect();
+        if parts.len() < 4 {
+            continue;
+        }
+        let proto = parts[0].to_string();
+        // Address is usually parts[4] in `ss` or parts[3] in `netstat`.
+        let addr_str = if parts.len() >= 5 && (parts[4].contains(':') || parts[4].contains('.')) {
+            parts[4]
+        } else if parts.len() >= 4 && (parts[3].contains(':') || parts[3].contains('.')) {
+            parts[3]
+        } else {
+            continue;
+        };
+
+        // Split addr and port (e.g. 0.0.0.0:80 or [::]:22 or *:80)
+        let (address, port) = if let Some(idx) = addr_str.rfind(':') {
+            let p_str = &addr_str[idx + 1..];
+            let p_num = p_str.parse::<u16>().unwrap_or(0);
+            (addr_str[..idx].to_string(), p_num)
+        } else {
+            (addr_str.to_string(), 0)
+        };
+
+        if port == 0 {
+            continue;
+        }
+
+        // Process info is usually in users:(("nginx",pid=123,fd=6)) or PID/Program name at end
+        let proc_info = parts.last().cloned().unwrap_or("");
+        let mut process = proc_info.to_string();
+        let mut pid: Option<u32> = None;
+
+        if proc_info.contains("pid=") {
+            if let Some(idx) = proc_info.find("pid=") {
+                let rest = &proc_info[idx + 4..];
+                let num_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                pid = num_str.parse().ok();
+            }
+            if let Some(s) = proc_info.find("((\"") {
+                let rest = &proc_info[s + 3..];
+                if let Some(e) = rest.find('"') {
+                    process = rest[..e].to_string();
+                }
+            }
+        }
+
+        ports.push(ListeningPort {
+            proto,
+            address,
+            port,
+            pid,
+            process,
+        });
+    }
+    ports
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

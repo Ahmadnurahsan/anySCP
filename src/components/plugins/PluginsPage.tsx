@@ -660,7 +660,10 @@ function CommandDetail({
         </div>
       ) : null}
       {runState.result ? (
-        <OutputRenderer result={runState.result} />
+        <OutputRenderer
+          result={runState.result}
+          label={`${info.manifest.id}-${command.id}`}
+        />
       ) : null}
     </div>
   );

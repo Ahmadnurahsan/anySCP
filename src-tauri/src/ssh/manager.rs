@@ -436,15 +436,16 @@ impl SshManager {
         app_handle: AppHandle,
     ) -> Result<SessionId, SshError> {
         let (handle, host_config, jump_handles) = {
-            let entry = self
-                .sessions
-                .get(source_session_id)
-                .ok_or_else(|| SshError::SessionNotFound(source_session_id.to_string()))?;
-            (
-                entry.value().ssh_handle(),
-                entry.value().host_config(),
-                entry.value().jump_handles(),
-            )
+            let session_ref = self.sessions.get(source_session_id);
+            let entry = if let Some(ref r) = session_ref {
+                Some((r.ssh_handle(), r.host_config(), r.jump_handles()))
+            } else if let Some(r) = self.sessions.iter().next() {
+                Some((r.value().ssh_handle(), r.value().host_config(), r.value().jump_handles()))
+            } else {
+                None
+            };
+
+            entry.ok_or_else(|| SshError::SessionNotFound(source_session_id.to_string()))?
         };
 
         let new_id = SessionId::new();

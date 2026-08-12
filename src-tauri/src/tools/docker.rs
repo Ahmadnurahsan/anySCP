@@ -99,6 +99,26 @@ pub struct DockerActionResponse {
     pub message: String,
 }
 
+/// Rich result from `docker inspect`, focusing on security-relevant fields.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DockerInspectResult {
+    pub image: String,
+    pub created: String,
+    /// True when the container runs with --privileged.
+    pub privileged: bool,
+    /// e.g. "" (default) or "host" — non-empty means shared PID namespace.
+    pub pid_mode: String,
+    pub network_mode: String,
+    pub security_opt: Vec<String>,
+    pub cap_add: Vec<String>,
+    pub cap_drop: Vec<String>,
+    pub restart_policy: String,
+    pub healthcheck_status: Option<String>,
+    pub env: Vec<String>,
+    /// Full pretty-printed JSON from `docker inspect`.
+    pub raw_json: String,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DockerLogFrame {
     pub stream_id: String,
@@ -358,6 +378,140 @@ pub async fn docker_logs(
     let handle = ssh.get_handle(&session_id)?;
     let out = exec::ssh_exec_str_checked(handle, &cmd).await?;
     Ok(out)
+}
+
+/// Return the full `docker inspect` JSON for a container.
+/// Extracts the most security-relevant fields into a flat struct for easy
+/// frontend consumption; also returns the raw JSON string for a "raw" view.
+#[tauri::command]
+#[instrument(skip(ssh))]
+pub async fn docker_inspect(
+    session_id: String,
+    container: String,
+    ssh: State<'_, SshManager>,
+) -> Result<DockerInspectResult, ToolsError> {
+    // Allow only safe container id/name characters.
+    if container.is_empty()
+        || container
+            .chars()
+            .any(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.'))
+    {
+        return Err(ToolsError::ParseError("invalid container id".into()));
+    }
+    let cmd = format!("docker inspect {container} 2>&1");
+    let handle = ssh.get_handle(&session_id)?;
+    let raw = exec::ssh_exec_str_checked(handle, &cmd).await?;
+
+    // docker inspect returns a JSON array; take first element.
+    let arr: Vec<Value> = serde_json::from_str(&raw)
+        .map_err(|e| ToolsError::ParseError(format!("inspect json: {e}")))?;
+    let obj = arr.into_iter().next().unwrap_or(Value::Null);
+
+    // Extract security-relevant fields from the HostConfig subtree.
+    let host = obj.get("HostConfig").cloned().unwrap_or(Value::Null);
+    let state_obj = obj.get("State").cloned().unwrap_or(Value::Null);
+    let config = obj.get("Config").cloned().unwrap_or(Value::Null);
+
+    let security_opt: Vec<String> = host
+        .get("SecurityOpt")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let cap_add: Vec<String> = host
+        .get("CapAdd")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let cap_drop: Vec<String> = host
+        .get("CapDrop")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let privileged = host
+        .get("Privileged")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let pid_mode = host
+        .get("PidMode")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    let network_mode = host
+        .get("NetworkMode")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    let restart_policy = host
+        .get("RestartPolicy")
+        .and_then(|r| r.get("Name"))
+        .and_then(Value::as_str)
+        .unwrap_or("no")
+        .to_string();
+
+    let healthcheck_status = state_obj
+        .get("Health")
+        .and_then(|h| h.get("Status"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    let image = config
+        .get("Image")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    let env: Vec<String> = config
+        .get("Env")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let created = obj
+        .get("Created")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    // Compact raw JSON for the "raw" view toggle.
+    let raw_json = serde_json::to_string_pretty(&obj)
+        .unwrap_or_else(|_| raw.clone());
+
+    Ok(DockerInspectResult {
+        image,
+        created,
+        privileged,
+        pid_mode,
+        network_mode,
+        security_opt,
+        cap_add,
+        cap_drop,
+        restart_policy,
+        healthcheck_status,
+        env,
+        raw_json,
+    })
 }
 
 /// Stop a `docker logs -f` stream started with [`docker_logs_follow`].

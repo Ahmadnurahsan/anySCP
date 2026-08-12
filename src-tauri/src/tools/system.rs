@@ -636,6 +636,34 @@ pub async fn service_control(
     })
 }
 
+/// Fetch recent journalctl log lines for a systemd unit.
+/// Returns the raw text (timestamps + messages) so the frontend can render it
+/// in a scrollable viewer. Degrades gracefully on non-systemd hosts.
+#[tauri::command]
+#[instrument(skip(ssh))]
+pub async fn service_log(
+    session_id: String,
+    unit: String,
+    lines: Option<u32>,
+    ssh: State<'_, SshManager>,
+) -> Result<String, ToolsError> {
+    if unit.is_empty()
+        || unit.chars().any(|c| !(c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_'))
+    {
+        return Err(ToolsError::ParseError("invalid unit name".into()));
+    }
+    let n = lines.unwrap_or(200).clamp(1, 10_000);
+    // --no-pager: avoid less; --output=short-iso: human-readable timestamps;
+    // 2>&1 so we also capture "journalctl not found" errors.
+    let cmd = format!(
+        "journalctl --no-pager --output=short-iso -u {unit} -n {n} 2>&1 \
+         || echo '(journalctl not available on this host)'"
+    );
+    let handle = ssh.get_handle(&session_id)?;
+    let out = exec::ssh_exec_str_checked(handle, &cmd).await?;
+    Ok(out)
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

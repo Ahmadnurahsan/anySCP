@@ -20,6 +20,7 @@ export function ProcessManager({ session }: Props) {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [confirmPid, setConfirmPid] = useState<number | null>(null);
   const [busyPid, setBusyPid] = useState<number | null>(null);
+  const [signal, setSignal] = useState<string>("TERM");
   const [notice, setNotice] = useState<string | null>(null);
 
   const rows = useMemo(() => {
@@ -70,10 +71,10 @@ export function ProcessManager({ session }: Props) {
     setBusyPid(proc.pid);
     setNotice(null);
     try {
-      const res = await killProcess(session.sshSessionId, proc.pid, "TERM");
+      const res = await killProcess(session.sshSessionId, proc.pid, signal);
       setNotice(
         res.ok
-          ? `Sent TERM to ${proc.name} (${proc.pid})`
+          ? `Sent SIG${signal} to ${proc.name} (${proc.pid})`
           : `Failed: ${res.message}`,
       );
       // Refresh so the row disappears (or stays) truthfully.
@@ -170,12 +171,25 @@ export function ProcessManager({ session }: Props) {
                     <Loader2 size={14} strokeWidth={1.8} className="animate-spin mx-auto" aria-hidden="true" />
                   ) : confirmPid === p.pid ? (
                     <span className="inline-flex items-center gap-1.5">
+                      {/* Signal selector */}
+                      <select
+                        value={signal}
+                        onChange={(e) => setSignal(e.target.value)}
+                        className="h-5 px-1 rounded bg-bg-surface border border-border/60 text-[11px] text-text-primary focus:outline-none"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <option value="TERM">SIGTERM (15)</option>
+                        <option value="KILL">SIGKILL (9)</option>
+                        <option value="HUP">SIGHUP (1)</option>
+                        <option value="INT">SIGINT (2)</option>
+                        <option value="STOP">SIGSTOP (19)</option>
+                      </select>
                       <button
                         type="button"
                         onClick={() => void doKill(p)}
                         className="px-2 py-0.5 rounded bg-status-error/15 text-status-error text-[11px] font-medium hover:bg-status-error/25"
                       >
-                        Confirm
+                        Send
                       </button>
                       <button
                         type="button"

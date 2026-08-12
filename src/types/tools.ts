@@ -122,7 +122,39 @@ export interface DockerLogFrame {
   error: string | null;
 }
 
+/** Parsed result of `docker inspect` with security-relevant fields exposed. */
+export interface DockerInspectResult {
+  image: string;
+  created: string;
+  privileged: boolean;
+  pid_mode: string;
+  network_mode: string;
+  security_opt: string[];
+  cap_add: string[];
+  cap_drop: string[];
+  restart_policy: string;
+  healthcheck_status: string | null;
+  env: string[];
+  /** Full pretty-printed JSON from docker inspect. */
+  raw_json: string;
+}
+
 // ─── Network (Phase 3) ────────────────────────────────────────────────────
+
+export interface ListeningPort {
+  proto: string;
+  address: string;
+  port: number;
+  pid: number | null;
+  process: string;
+}
+
+export interface DnsLookupResponse {
+  query: string;
+  record_type: string;
+  result: string;
+  error: string | null;
+}
 
 export interface NetworkToolsAvailability {
   nmap: boolean;

@@ -1,5 +1,21 @@
-import { useEffect, useState } from "react";
-import { RefreshCw, Play, Square, RotateCw, Loader2, ShieldAlert } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  RefreshCw,
+  Play,
+  Square,
+  RotateCw,
+  Loader2,
+  ShieldAlert,
+  FileText,
+  X,
+  Search,
+  Copy,
+  Check,
+  Download,
+  ChevronDown,
+  ChevronUp,
+  WrapText,
+} from "lucide-react";
 import type { ServiceAction } from "../../types";
 import type { ToolsSession } from "../../stores/tools-store";
 import { useToolsStore } from "../../stores/tools-store";
@@ -19,8 +35,13 @@ export function ServiceManager({ session }: Props) {
   const refreshServices = useToolsStore((s) => s.refreshServices);
   const loadServiceAvailability = useToolsStore((s) => s.loadServiceAvailability);
   const serviceControl = useToolsStore((s) => s.serviceControl);
+  const fetchServiceLog = useToolsStore((s) => s.fetchServiceLog);
+  const clearServiceLog = useToolsStore((s) => s.clearServiceLog);
+
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
+  const [search, setSearch] = useState("");
+  const [logUnit, setLogUnit] = useState<string | null>(null);
 
   useEffect(() => {
     void loadServiceAvailability(session.sshSessionId).then((available) => {
@@ -28,6 +49,13 @@ export function ServiceManager({ session }: Props) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.sshSessionId]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q
+      ? session.services.filter((sv) => sv.name.toLowerCase().includes(q))
+      : session.services;
+  }, [session.services, search]);
 
   const run = async (unit: string, action: ServiceAction) => {
     setBusy(`${action}:${unit}`);
@@ -44,7 +72,6 @@ export function ServiceManager({ session }: Props) {
           text: res.ok ? `${action} ${res.unit} OK` : `${action} ${res.unit} failed: ${res.message}`,
           ok: res.ok,
         });
-        // Refresh after a control op lands.
         await refreshServices(session.sshSessionId, true);
       }
     } catch (err) {
@@ -56,6 +83,16 @@ export function ServiceManager({ session }: Props) {
     } finally {
       setBusy(null);
     }
+  };
+
+  const toggleLog = async (unit: string) => {
+    if (logUnit === unit) {
+      setLogUnit(null);
+      clearServiceLog(session.sshSessionId, unit);
+      return;
+    }
+    setLogUnit(unit);
+    await fetchServiceLog(session.sshSessionId, unit, 300);
   };
 
   if (session.serviceAvailable === false) {
@@ -81,7 +118,23 @@ export function ServiceManager({ session }: Props) {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 shrink-0 bg-bg-subtle border-b border-border/60">
+        <div className="relative flex-1 min-w-0 max-w-xs">
+          <Search
+            size={13}
+            strokeWidth={1.8}
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted"
+            aria-hidden="true"
+          />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter services…"
+            className="w-full h-7 pl-7 pr-2 rounded-md bg-bg-surface border border-border/60 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
         <button
           type="button"
           onClick={() => void refreshServices(session.sshSessionId, true)}
@@ -100,6 +153,7 @@ export function ServiceManager({ session }: Props) {
         )}
       </div>
 
+      {/* Table */}
       <div className="flex-1 min-h-0 overflow-auto">
         <table className="w-full border-collapse text-xs">
           <thead className="sticky top-0 bg-bg-surface">
@@ -112,7 +166,7 @@ export function ServiceManager({ session }: Props) {
             </tr>
           </thead>
           <tbody>
-            {session.services.map((sv) => (
+            {filtered.map((sv) => (
               <tr key={sv.name} className="border-t border-border/40 hover:bg-bg-overlay/60">
                 <td className="px-3 py-1 font-mono truncate max-w-[240px]" title={sv.name}>
                   {sv.name}
@@ -147,20 +201,164 @@ export function ServiceManager({ session }: Props) {
                         )}
                       </button>
                     ))}
+                    {/* journalctl log button */}
+                    <button
+                      type="button"
+                      onClick={() => void toggleLog(sv.name)}
+                      title="View journalctl logs"
+                      className={`p-1 rounded hover:bg-bg-overlay ${logUnit === sv.name ? "text-accent" : "text-text-muted hover:text-text-primary"}`}
+                    >
+                      {session.serviceLogLoading === sv.name ? (
+                        <Loader2 size={13} strokeWidth={1.8} className="animate-spin" />
+                      ) : (
+                        <FileText size={13} strokeWidth={1.8} aria-hidden="true" />
+                      )}
+                    </button>
                   </span>
                 </td>
               </tr>
             ))}
-            {session.services.length === 0 && (
+            {filtered.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-3 py-8 text-center text-text-muted">
-                  {session.serviceLoading ? "Loading…" : "No services returned."}
+                  {session.serviceLoading
+                    ? "Loading…"
+                    : session.services.length === 0
+                      ? "No services returned."
+                      : "No services match your filter."}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Service log drawer */}
+      {logUnit && session.serviceLogs[logUnit] !== undefined && (
+        <ServiceLogPane
+          unit={logUnit}
+          text={session.serviceLogs[logUnit]}
+          loading={session.serviceLogLoading === logUnit}
+          onClose={() => {
+            setLogUnit(null);
+            clearServiceLog(session.sshSessionId, logUnit);
+          }}
+          onRefresh={() => void fetchServiceLog(session.sshSessionId, logUnit, 300)}
+        />
+      )}
     </div>
   );
+}
+
+// ─── ServiceLogPane ───────────────────────────────────────────────────────────
+
+function ServiceLogPane({
+  unit,
+  text,
+  loading,
+  onClose,
+  onRefresh,
+}: {
+  unit: string;
+  text: string;
+  loading: boolean;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [wrap, setWrap] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const filtered = useMemo(() => {
+    if (!search) return text;
+    return text
+      .split("\n")
+      .filter((l) => l.toLowerCase().includes(search.toLowerCase()))
+      .join("\n");
+  }, [text, search]);
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(filtered);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDownload = () => {
+    const blob = new Blob([filtered], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${unit}-${timestamp()}.log`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className={`shrink-0 flex flex-col bg-bg-base border-t border-border/60 transition-all ${expanded ? "h-96" : "h-52"}`}>
+      {/* Header */}
+      <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-subtle border-b border-border/60 shrink-0">
+        <FileText size={13} className="text-accent shrink-0" />
+        <span className="text-[11px] font-mono font-semibold text-text-primary">{unit}</span>
+
+        {/* Search */}
+        <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-bg-surface border border-border/60 flex-1 min-w-0 max-w-xs">
+          <Search size={11} className="text-text-muted shrink-0" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter lines…"
+            spellCheck={false}
+            className="flex-1 bg-transparent text-[11px] text-text-primary placeholder:text-text-muted outline-none"
+          />
+          {search && (
+            <button type="button" onClick={() => setSearch("")} className="text-text-muted hover:text-text-primary">
+              <X size={10} />
+            </button>
+          )}
+        </div>
+
+        <span className="ml-auto" />
+
+        <button type="button" onClick={onRefresh} title="Reload logs" className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-overlay">
+          {loading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} strokeWidth={1.8} />}
+        </button>
+        <button type="button" onClick={() => setWrap((v) => !v)} title="Toggle wrap" className={`p-1 rounded ${wrap ? "text-accent" : "text-text-muted hover:text-text-primary"} hover:bg-bg-overlay`}>
+          <WrapText size={13} strokeWidth={1.8} />
+        </button>
+        <button type="button" onClick={handleCopy} title="Copy" className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-overlay">
+          {copied ? <Check size={13} className="text-status-connected" /> : <Copy size={13} strokeWidth={1.8} />}
+        </button>
+        <button type="button" onClick={handleDownload} title="Download" className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-overlay">
+          <Download size={13} strokeWidth={1.8} />
+        </button>
+        <button type="button" onClick={() => setExpanded((v) => !v)} title={expanded ? "Collapse" : "Expand"} className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-overlay">
+          {expanded ? <ChevronDown size={13} strokeWidth={1.8} /> : <ChevronUp size={13} strokeWidth={1.8} />}
+        </button>
+        <button type="button" onClick={onClose} title="Close" className="p-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-overlay">
+          <X size={13} strokeWidth={1.8} />
+        </button>
+      </div>
+
+      <pre
+        className={`flex-1 min-h-0 overflow-auto px-3 py-1.5 font-mono text-[11px] leading-relaxed text-text-secondary select-text cursor-text ${wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"}`}
+      >
+        {loading ? "Loading…" : filtered || "(no output)"}
+      </pre>
+    </div>
+  );
+}
+
+function timestamp(): string {
+  const d = new Date();
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, "0"),
+    String(d.getDate()).padStart(2, "0"),
+    String(d.getHours()).padStart(2, "0"),
+    String(d.getMinutes()).padStart(2, "0"),
+  ].join("");
 }
