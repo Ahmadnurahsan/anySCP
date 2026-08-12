@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Activity,
+  Blocks,
 } from "lucide-react";
 import { useTabStore, type UnifiedTab, type PageId } from "../../stores/tab-store";
 import { useSessionStore, countPanes, getTopDirection } from "../../stores/session-store";
@@ -31,6 +32,7 @@ const PAGE_ICONS: Record<PageId, React.ElementType> = {
   history: History,
   settings: Settings,
   transfers: ArrowUpDown,
+  plugins: Blocks,
 };
 
 function getTabIcon(tab: UnifiedTab): React.ElementType {

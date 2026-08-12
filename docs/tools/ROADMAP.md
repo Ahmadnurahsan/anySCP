@@ -163,10 +163,17 @@ Semua tools berjalan **melalui existing SSH session** — tidak ada koneksi baru
 - **DB** — migration 16 `plugins` (id, manifest_json, enabled, source, installed_version, local_override_path, installed_at) + CRUD di `HostDb`.
 - Tests: **+38** (Rust total 257). Clippy bersih untuk kode baru.
 
-### Belum (Phase B–D, sengaja ditunda)
-- **B — Generic renderer UI**: 4 widget frontend + halaman Plugins (list/detail/form variable/run). Effort UI 1× untuk semua plugin.
+### Belum (Phase C–D, sengaja ditunda)
 - **C — Marketplace**: repo GitHub `anyscp-plugins`, halaman browse+install.
 - **D — Starter pack**: mysql, nginx, node/pm2, disk analyzer, security audit, DNS.
+
+## Plugin System (Phase B) ✅ (generic renderer UI + PluginsPage)
+- `src/types/plugins.ts` — tipe FE mirror backend (Plugin/PluginCommand/PluginVariable/Parser/PluginRunResult/…). `src/types/index.ts` re-export.
+- `src/stores/plugin-store.ts` — list/install/uninstall/enable/run; state per `plugin:command:session`, cache-bypass + error `{kind,message}` di-surface langsung.
+- `OutputRenderer` — 4 widget generik: `text` (monospace), `table` (sticky header, zebra), `metrics` (tile dengan unit), `json` (pretty-print). + badge exit code / cached / truncated.
+- `PluginsPage` — install via URL atau file picker, list installed (toggle enable + uninstall confirm), per-command form variable (text/number/password/select/boolean), pemilih session terkoneksi, konfirmasi dangerous command, hasil widget.
+- Entry: PageId `plugins`, sidebar nav, `PAGE_ICONS`, render di AppShell.
+- Tests: **+14** (8 plugin-store + 6 OutputRenderer), FE total 139. `vitest` + `tsc` hijau.
 
 ### Alur `plugin_run` (ringkas)
 1. Load manifest dari SQLite → cek enabled.

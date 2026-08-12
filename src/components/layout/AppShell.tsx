@@ -24,6 +24,7 @@ import { SettingsPage } from "../settings";
 import { PortForwardingPage } from "../port-forwarding";
 import { HistoryPage } from "../history";
 import { TransfersPage } from "../transfers";
+import { PluginsPage } from "../plugins";
 import { usePortForwardEvents } from "../../hooks/use-port-forward-events";
 import { UpdateDialog } from "../updater/UpdateDialog";
 import { Toaster } from "../shared/Toaster";
@@ -494,6 +495,8 @@ export function AppShell() {
                   <SettingsPage />
                 ) : activePageType === "transfers" ? (
                   <TransfersPage />
+                ) : activePageType === "plugins" ? (
+                  <PluginsPage />
                 ) : null}
               </div>
             )}

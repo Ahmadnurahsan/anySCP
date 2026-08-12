@@ -90,3 +90,19 @@ export type {
   TracerouteHop,
   TracerouteResponse,
 } from "./tools";
+
+export type {
+  VarType,
+  OutputKind,
+  ParserType,
+  Parser,
+  PluginVariable,
+  PluginCommand,
+  Plugin,
+  PluginSource,
+  PluginInfo,
+  PluginTable,
+  Metric,
+  PluginRunResult,
+  PluginError,
+} from "./plugins";

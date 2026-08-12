@@ -26,12 +26,12 @@ session_id, variables, refresh)`, `plugin_install(source)` dengan `source` enum 
 `{type:"local"|"url", ...}`, `plugin_uninstall(plugin_id)`, `plugin_enable(plugin_id, enabled)`,
 `plugin_list()`. Semua error dikirim sebagai `{kind, message}`.
 
-- [ ] `src/types/plugins.ts` — tipe manifest + hasil run (mirror backend)
-- [ ] `src/stores/plugin-store.ts` — list/install/uninstall/enable/run + state
-- [ ] `OutputRenderer` — 4 widget generik: `text` / `table` / `metrics` / `json`
-- [ ] `PluginsPage` — list installed, detail, form variable (type select/password/boolean), tombol run, hasil
-- [ ] Entry point + tab di AppShell
-- [ ] Vitest + tsc hijau
+- [x] `src/types/plugins.ts` — tipe manifest + hasil run (mirror backend)
+- [x] `src/stores/plugin-store.ts` — list/install/uninstall/enable/run + state
+- [x] `OutputRenderer` — 4 widget generik: `text` / `table` / `metrics` / `json`
+- [x] `PluginsPage` — list installed, detail, form variable (type select/password/boolean), tombol run, hasil
+- [x] Entry point + tab di AppShell (sidebar "Plugins" + PAGE_ICONS)
+- [x] Vitest + tsc hijau (139 total), OutputRenderer + plugin-store di-test
 - [ ] Push
 
 ## Fase C — Marketplace (repo GitHub terpisah)

@@ -1,5 +1,5 @@
 import { useRef, useCallback, useState } from "react";
-import { Monitor, Braces, Settings, ArrowUpDown, Plug, History, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { Monitor, Braces, Settings, ArrowUpDown, Plug, History, Blocks, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { useUiStore } from "../../stores/ui-store";
 import { useTabStore, type PageId } from "../../stores/tab-store";
 import { useTransferStore } from "../../stores/transfer-store";
@@ -21,6 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: "snippets",         icon: Braces,         label: "Snippets",  page: "snippets" },
   { id: "port-forwarding",  icon: Plug,           label: "Tunnels",   page: "port-forwarding" },
   { id: "history",          icon: History,        label: "History",   page: "history" },
+  { id: "plugins",          icon: Blocks,         label: "Plugins",   page: "plugins" },
 ];
 
 // ─── Pill button ─────────────────────────────────────────────────────────────
