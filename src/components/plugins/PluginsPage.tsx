@@ -12,6 +12,7 @@ import {
   Terminal,
   AlertTriangle,
   ShieldAlert,
+  Store,
 } from "lucide-react";
 import { usePluginStore, runKey } from "../../stores/plugin-store";
 import { useSessionStore } from "../../stores/session-store";
@@ -19,6 +20,7 @@ import type {
   PluginInfo,
   PluginCommand,
   PluginVariable,
+  PluginMarketplaceEntry,
 } from "../../types";
 import { OutputRenderer } from "./OutputRenderer";
 
@@ -41,13 +43,26 @@ export function PluginsPage() {
   const installing = usePluginStore((s) => s.installing);
   const list = usePluginStore((s) => s.list);
   const clearError = usePluginStore((s) => s.clearError);
+  const marketplace = usePluginStore((s) => s.marketplace);
+  const marketLoading = usePluginStore((s) => s.marketLoading);
+  const marketError = usePluginStore((s) => s.marketError);
+  const loadMarketplace = usePluginStore((s) => s.loadMarketplace);
 
+  const [view, setView] = useState<"installed" | "marketplace">("installed");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [installUrl, setInstallUrl] = useState("");
 
   useEffect(() => {
     void list();
   }, [list]);
+
+  // Load the registry the first time Browse is opened.
+  useEffect(() => {
+    if (view === "marketplace" && marketplace === null && !marketLoading) {
+      void loadMarketplace();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
   const selected = installed?.find((p) => p.manifest.id === selectedId) ?? null;
 
@@ -65,89 +80,238 @@ export function PluginsPage() {
           </span>
         </div>
 
-        {/* Install bar */}
-        <div className="flex items-center gap-2 px-2 py-1.5 shrink-0 bg-bg-subtle border-b border-border/60 no-select">
-          <Link2 size={13} strokeWidth={1.8} className="shrink-0 text-text-muted" aria-hidden="true" />
-          <input
-            value={installUrl}
-            onChange={(e) => setInstallUrl(e.target.value)}
-            placeholder="https://raw.githubusercontent.com/…/manifest.json"
-            spellCheck={false}
-            className={INPUT_CLASS}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && installUrl.trim()) void installFromUrl(installUrl);
-            }}
+        {/* Sub-tab strip */}
+        <div className="flex items-center gap-1 px-2 py-1.5 shrink-0 bg-bg-subtle border-b border-border/60 no-select">
+          <SubTab
+            label="Installed"
+            icon={<Blocks size={13} strokeWidth={1.8} aria-hidden="true" />}
+            active={view === "installed"}
+            onClick={() => setView("installed")}
           />
-          <button
-            type="button"
-            onClick={pickLocalFile}
-            className={BTN_GHOST}
-            title="Install from a local JSON manifest"
-          >
-            <FolderOpen size={13} strokeWidth={1.8} aria-hidden="true" />
-            File…
-          </button>
-          <button
-            type="button"
-            onClick={() => void installFromUrl(installUrl)}
-            disabled={installing || !installUrl.trim()}
-            className={BTN_PRIMARY}
-          >
-            {installing ? (
-              <Loader2 size={13} strokeWidth={1.8} className="animate-spin" aria-hidden="true" />
-            ) : (
-              <PackagePlus size={13} strokeWidth={1.8} aria-hidden="true" />
-            )}
-            Install
-          </button>
-          <button
-            type="button"
-            onClick={() => void list()}
-            disabled={loading}
-            className={BTN_GHOST}
-            title="Refresh installed plugins"
-          >
-            <RefreshCw size={13} strokeWidth={1.8} className={loading ? "animate-spin" : ""} aria-hidden="true" />
-          </button>
+          <SubTab
+            label="Browse"
+            icon={<Store size={13} strokeWidth={1.8} aria-hidden="true" />}
+            active={view === "marketplace"}
+            onClick={() => setView("marketplace")}
+          />
+          {view === "marketplace" && (
+            <button
+              type="button"
+              onClick={() => void loadMarketplace(true)}
+              disabled={marketLoading}
+              className={BTN_GHOST + " ml-auto"}
+              title="Refresh marketplace registry"
+            >
+              <RefreshCw size={13} strokeWidth={1.8} className={marketLoading ? "animate-spin" : ""} aria-hidden="true" />
+              Refresh
+            </button>
+          )}
         </div>
 
-        {error && (
-          <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-status-error bg-status-error/10 border-b border-border/60">
-            <AlertTriangle size={13} strokeWidth={1.8} aria-hidden="true" />
-            <span className="flex-1 truncate" title={error}>{error}</span>
-            <button type="button" onClick={clearError} className="text-text-muted hover:text-text-primary">✕</button>
-          </div>
+        {view === "marketplace" ? (
+          <MarketplaceView
+            marketplace={marketplace}
+            loading={marketLoading}
+            error={marketError}
+            installedIds={new Set((installed ?? []).map((p) => p.manifest.id))}
+          />
+        ) : (
+          <>
+            {/* Install bar */}
+            <div className="flex items-center gap-2 px-2 py-1.5 shrink-0 bg-bg-subtle border-b border-border/60 no-select">
+              <Link2 size={13} strokeWidth={1.8} className="shrink-0 text-text-muted" aria-hidden="true" />
+              <input
+                value={installUrl}
+                onChange={(e) => setInstallUrl(e.target.value)}
+                placeholder="https://raw.githubusercontent.com/…/manifest.json"
+                spellCheck={false}
+                className={INPUT_CLASS}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && installUrl.trim()) void installFromUrl(installUrl);
+                }}
+              />
+              <button
+                type="button"
+                onClick={pickLocalFile}
+                className={BTN_GHOST}
+                title="Install from a local JSON manifest"
+              >
+                <FolderOpen size={13} strokeWidth={1.8} aria-hidden="true" />
+                File…
+              </button>
+              <button
+                type="button"
+                onClick={() => void installFromUrl(installUrl)}
+                disabled={installing || !installUrl.trim()}
+                className={BTN_PRIMARY}
+              >
+                {installing ? (
+                  <Loader2 size={13} strokeWidth={1.8} className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <PackagePlus size={13} strokeWidth={1.8} aria-hidden="true" />
+                )}
+                Install
+              </button>
+              <button
+                type="button"
+                onClick={() => void list()}
+                disabled={loading}
+                className={BTN_GHOST}
+                title="Refresh installed plugins"
+              >
+                <RefreshCw size={13} strokeWidth={1.8} className={loading ? "animate-spin" : ""} aria-hidden="true" />
+              </button>
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 px-3 py-1.5 text-xs text-status-error bg-status-error/10 border-b border-border/60">
+                <AlertTriangle size={13} strokeWidth={1.8} aria-hidden="true" />
+                <span className="flex-1 truncate" title={error}>{error}</span>
+                <button type="button" onClick={clearError} className="text-text-muted hover:text-text-primary">✕</button>
+              </div>
+            )}
+
+            {/* Body */}
+            <div className="flex flex-1 min-h-0">
+              {/* Installed list */}
+              <div className="w-64 shrink-0 border-r border-border/60 overflow-y-auto bg-bg-base">
+                {installed === null ? (
+                  <EmptyHint text={loading ? "Loading…" : "No plugins installed yet."} />
+                ) : installed.length === 0 ? (
+                  <EmptyHint text="No plugins installed yet." />
+                ) : (
+                  installed.map((p) => (
+                    <PluginCard
+                      key={p.manifest.id}
+                      info={p}
+                      active={p.manifest.id === selectedId}
+                      onClick={() => setSelectedId(p.manifest.id)}
+                    />
+                  ))
+                )}
+              </div>
+
+              {/* Detail */}
+              <div className="flex-1 min-w-0 overflow-y-auto bg-bg-base">
+                {selected ? (
+                  <PluginDetail info={selected} />
+                ) : (
+                  <EmptyHint text="Select a plugin to see its commands." />
+                )}
+              </div>
+            </div>
+          </>
         )}
+      </div>
+    </div>
+  );
+}
 
-        {/* Body */}
-        <div className="flex flex-1 min-h-0">
-          {/* Installed list */}
-          <div className="w-64 shrink-0 border-r border-border/60 overflow-y-auto bg-bg-base">
-            {installed === null ? (
-              <EmptyHint text={loading ? "Loading…" : "No plugins installed yet."} />
-            ) : installed.length === 0 ? (
-              <EmptyHint text="No plugins installed yet." />
-            ) : (
-              installed.map((p) => (
-                <PluginCard
-                  key={p.manifest.id}
-                  info={p}
-                  active={p.manifest.id === selectedId}
-                  onClick={() => setSelectedId(p.manifest.id)}
-                />
-              ))
-            )}
-          </div>
+function SubTab({
+  label,
+  icon,
+  active,
+  onClick,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[length:var(--text-xs)] font-medium transition-colors",
+        "duration-[var(--duration-fast)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active ? "bg-accent/15 text-accent" : "text-text-secondary hover:text-text-primary hover:bg-bg-overlay",
+      ].join(" ")}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
 
-          {/* Detail */}
-          <div className="flex-1 min-w-0 overflow-y-auto bg-bg-base">
-            {selected ? (
-              <PluginDetail info={selected} />
-            ) : (
-              <EmptyHint text="Select a plugin to see its commands." />
-            )}
-          </div>
-        </div>
+function MarketplaceView({
+  marketplace,
+  loading,
+  error,
+  installedIds,
+}: {
+  marketplace: PluginMarketplaceEntry[] | null;
+  loading: boolean;
+  error: string | null;
+  installedIds: Set<string>;
+}) {
+  const installing = usePluginStore((s) => s.installing);
+
+  if (loading && marketplace === null) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-text-muted text-xs gap-2">
+        <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+        Loading registry…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <EmptyHint text={error} />
+      </div>
+    );
+  }
+  if (!marketplace || marketplace.length === 0) {
+    return <EmptyHint text="Registry kosong." />;
+  }
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto bg-bg-base">
+      <div className="p-3 space-y-2">
+        {marketplace.map((m) => {
+          const isInstalled = installedIds.has(m.id);
+          return (
+            <div
+              key={m.id}
+              className="flex items-center gap-3 rounded-lg border border-border/60 bg-bg-subtle p-3"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[13px] font-medium text-text-primary">{m.name}</span>
+                  <span className="text-[10px] font-mono text-text-muted">v{m.version}</span>
+                  <span className="text-[10px] text-text-muted">{m.author}</span>
+                  {m.platforms.length > 0 ? (
+                    <span className="text-[10px] text-text-muted">{m.platforms.join(", ")}</span>
+                  ) : null}
+                </div>
+                {m.description ? (
+                  <p className="text-[11px] text-text-muted mt-0.5 truncate" title={m.description}>
+                    {m.description}
+                  </p>
+                ) : null}
+                <p className="text-[10px] font-mono text-text-muted/70 mt-0.5 truncate" title={m.url}>
+                  {m.id}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void usePluginStore.getState().install({ type: "url", url: m.url })}
+                disabled={isInstalled || installing}
+                className={isInstalled ? BTN_GHOST : BTN_PRIMARY}
+              >
+                {isInstalled ? (
+                  "Installed"
+                ) : (
+                  <>
+                    <PackagePlus size={13} strokeWidth={1.8} aria-hidden="true" />
+                    Install
+                  </>
+                )}
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

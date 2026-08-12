@@ -53,6 +53,9 @@ describe("plugin-store", () => {
       error: null,
       installing: false,
       runs: {},
+      marketplace: null,
+      marketLoading: false,
+      marketError: null,
     });
   });
 
@@ -154,5 +157,32 @@ describe("plugin-store", () => {
     expect(usePluginStore.getState().runs[key].running).toBe(true);
     resolve({ exit_code: 0 });
     await pending;
+  });
+
+  it("loads the marketplace registry", async () => {
+    const entries = [
+      {
+        id: "system",
+        name: "System",
+        version: "1.0.0",
+        author: "anySCP",
+        description: null,
+        icon: null,
+        platforms: ["linux"],
+        url: "https://raw.githubusercontent.com/x/manifest.json",
+      },
+    ];
+    invoke.mockResolvedValue(entries);
+    await usePluginStore.getState().loadMarketplace();
+    expect(invoke).toHaveBeenCalledWith("plugin_marketplace_list", { refresh: false });
+    expect(usePluginStore.getState().marketplace).toEqual(entries);
+    expect(usePluginStore.getState().marketLoading).toBe(false);
+  });
+
+  it("surfaces a marketplace fetch error", async () => {
+    invoke.mockRejectedValue({ kind: "fetch_error", message: "offline" });
+    await usePluginStore.getState().loadMarketplace();
+    expect(usePluginStore.getState().marketError).toBe("offline");
+    expect(usePluginStore.getState().marketplace).toBeNull();
   });
 });

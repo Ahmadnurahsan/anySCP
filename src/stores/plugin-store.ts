@@ -3,6 +3,7 @@ import type {
   PluginInfo,
   PluginSource,
   PluginRunResult,
+  PluginMarketplaceEntry,
 } from "../types";
 
 export interface PluginRunState {
@@ -20,6 +21,10 @@ interface PluginState {
   installing: boolean;
   /** Per-run state, keyed `${pluginId}:${commandId}:${sessionId}`. */
   runs: Record<string, PluginRunState>;
+  /** Marketplace registry — `null` until the first `loadMarketplace()`. */
+  marketplace: PluginMarketplaceEntry[] | null;
+  marketLoading: boolean;
+  marketError: string | null;
 
   list: () => Promise<void>;
   install: (source: PluginSource) => Promise<void>;
@@ -34,6 +39,7 @@ interface PluginState {
   ) => Promise<PluginRunResult | null>;
   clearResult: (key: string) => void;
   clearError: () => void;
+  loadMarketplace: (refresh?: boolean) => Promise<void>;
 }
 
 export function runKey(pluginId: string, commandId: string, sessionId: string): string {
@@ -54,6 +60,9 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   error: null,
   installing: false,
   runs: {},
+  marketplace: null,
+  marketLoading: false,
+  marketError: null,
 
   list: async () => {
     set({ loading: true, error: null });
@@ -139,4 +148,18 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     }),
 
   clearError: () => set({ error: null }),
+
+  loadMarketplace: async (refresh = false) => {
+    set({ marketLoading: true, marketError: null });
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const marketplace = await invoke<PluginMarketplaceEntry[]>(
+        "plugin_marketplace_list",
+        { refresh },
+      );
+      set({ marketplace, marketLoading: false });
+    } catch (err) {
+      set({ marketLoading: false, marketError: msg(err) });
+    }
+  },
 }));

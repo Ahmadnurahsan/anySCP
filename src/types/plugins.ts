@@ -74,6 +74,19 @@ export interface PluginInfo {
   manifest: Plugin;
 }
 
+/** One row of the marketplace registry — metadata + raw manifest URL. */
+export interface PluginMarketplaceEntry {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  description?: string | null;
+  icon?: string | null;
+  platforms: string[];
+  /** Raw URL of the plugin manifest (http/https). */
+  url: string;
+}
+
 export interface PluginTable {
   columns: string[];
   rows: string[][];

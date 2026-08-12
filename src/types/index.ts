@@ -101,6 +101,7 @@ export type {
   Plugin,
   PluginSource,
   PluginInfo,
+  PluginMarketplaceEntry,
   PluginTable,
   Metric,
   PluginRunResult,
