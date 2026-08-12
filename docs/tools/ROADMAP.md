@@ -163,10 +163,6 @@ Semua tools berjalan **melalui existing SSH session** — tidak ada koneksi baru
 - **DB** — migration 16 `plugins` (id, manifest_json, enabled, source, installed_version, local_override_path, installed_at) + CRUD di `HostDb`.
 - Tests: **+38** (Rust total 257). Clippy bersih untuk kode baru.
 
-### Belum (Phase C–D, sengaja ditunda)
-- **C — Marketplace**: repo GitHub `anyscp-plugins`, halaman browse+install.
-- **D — Starter pack**: mysql, nginx, node/pm2, disk analyzer, security audit, DNS.
-
 ## Plugin System (Phase B) ✅ (generic renderer UI + PluginsPage)
 - `src/types/plugins.ts` — tipe FE mirror backend (Plugin/PluginCommand/PluginVariable/Parser/PluginRunResult/…). `src/types/index.ts` re-export.
 - `src/stores/plugin-store.ts` — list/install/uninstall/enable/run; state per `plugin:command:session`, cache-bypass + error `{kind,message}` di-surface langsung.
@@ -174,6 +170,25 @@ Semua tools berjalan **melalui existing SSH session** — tidak ada koneksi baru
 - `PluginsPage` — install via URL atau file picker, list installed (toggle enable + uninstall confirm), per-command form variable (text/number/password/select/boolean), pemilih session terkoneksi, konfirmasi dangerous command, hasil widget.
 - Entry: PageId `plugins`, sidebar nav, `PAGE_ICONS`, render di AppShell.
 - Tests: **+14** (8 plugin-store + 6 OutputRenderer), FE total 139. `vitest` + `tsc` hijau.
+
+## Plugin System (Phase C) ✅ (marketplace)
+- Repo **`Ahmadnurahsan/anyscp-plugins`** (public, MIT): `registry.json` (index) + `plugins/<id>/manifest.json` + CI `scripts/validate.py` (validasi mirip manifest.rs; jalan di tiap push/PR).
+- **`plugin_marketplace_list`** (BE) — fetch `MARKETPLACE_REGISTRY_URL` (raw githubusercontent) dengan timeout 15s, cache TTL 300s via `ToolsManager`, param `refresh`. `validate_registry` (id/name/version + url http(s)) dijalankan sebelum di-cache.
+- **Browse** (FE) — tab di PluginsPage: list registry, tombol Install (disabled kalau sudah terpasang), lazy-load saat tab dibuka pertama kali, tombol Refresh.
+- Install marketplace = `plugin_install` URL yang sudah ada (marketplace cuma index, bukan jalur baru).
+- Tests: **+6** (Rust 261 total, FE 141 total). Clippy bersih untuk kode baru.
+
+## Plugin System (Phase D) ✅ (starter pack — 8 plugin)
+- Semua lolos validasi **strict Rust** (`deny_unknown_fields`) + CI Python.
+- **system** — metrics overview (load/mem/swap/disk/uptime), host info, reboot-required.
+- **services** — systemd: all units (table JSON), running, per-unit status, failed.
+- **mysql** — ping, status (metrics), processlist (table CSV), raw query (dangerous); variable host/port/user/password.
+- **nginx** — status, config test, vhosts, reload (dangerous).
+- **pm2** — process list (jlist→table via node), logs, restart (dangerous).
+- **disk** — usage by mount (table), top directories (du), inode usage.
+- **security** — sshd -T (key/value), listening ports (ss regex_table), shell users, pending updates.
+- **dns** — resolve A/AAAA, MX, TXT (dig + nslookup fallback).
+- Repo: `anyscp-plugins`, commit `18edd9e`.
 
 ### Alur `plugin_run` (ringkas)
 1. Load manifest dari SQLite → cek enabled.
