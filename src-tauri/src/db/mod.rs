@@ -149,6 +149,34 @@ pub struct HostGroup {
     pub updated_at: String,
 }
 
+/// Storage row for an installed plugin. The validated manifest JSON lives in
+/// `manifest_json`; the richer parsed form is owned by the `plugins` module.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginRecord {
+    pub id: String,
+    pub manifest_json: String,
+    pub enabled: bool,
+    /// Where the plugin came from: `local` | `url` | `marketplace`.
+    pub source: String,
+    pub installed_version: String,
+    pub local_override_path: Option<String>,
+    pub installed_at: String,
+}
+
+/// Map a `plugins` row into a [`PluginRecord`]. Shared by every query so the
+/// column order stays consistent.
+fn plugin_record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PluginRecord> {
+    Ok(PluginRecord {
+        id: row.get(0)?,
+        manifest_json: row.get(1)?,
+        enabled: row.get(2)?,
+        source: row.get(3)?,
+        installed_version: row.get(4)?,
+        local_override_path: row.get(5)?,
+        installed_at: row.get(6)?,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Database handle
 // ---------------------------------------------------------------------------
@@ -539,6 +567,25 @@ impl HostDb {
                 [],
             )?;
             tracing::info!("migration 14→15 applied: added s3_connections.sort_order");
+        }
+
+        if version < 16 {
+            // Plugin system (Phase A): installed JSON manifests. `manifest_json`
+            // is stored verbatim (validated at install time by the plugins
+            // module) so a re-parse is cheap and the original is preserved.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS plugins (
+                    id                   TEXT PRIMARY KEY,
+                    manifest_json        TEXT NOT NULL,
+                    enabled              INTEGER NOT NULL DEFAULT 1,
+                    source               TEXT NOT NULL DEFAULT 'local',
+                    installed_version    TEXT NOT NULL DEFAULT '',
+                    local_override_path  TEXT,
+                    installed_at         TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', '16');",
+            )?;
+            tracing::info!("migration 15→16 applied: created plugins");
         }
 
         Ok(())
@@ -1511,6 +1558,93 @@ impl HostDb {
             )
             .optional()?;
         Ok(value)
+    }
+
+    // -----------------------------------------------------------------------
+    // Plugin system — installed manifests
+    // -----------------------------------------------------------------------
+
+    /// Return every installed plugin, ordered by id.
+    pub fn list_plugins(&self) -> Result<Vec<PluginRecord>, DbError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| DbError::InitError(format!("db lock poisoned: {e}")))?;
+        let mut stmt =
+            conn.prepare("SELECT id, manifest_json, enabled, source, installed_version, local_override_path, installed_at FROM plugins ORDER BY id ASC")?;
+        let rows = stmt
+            .query_map([], plugin_record_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Look up a single plugin by id. Returns `None` when not installed.
+    pub fn get_plugin(&self, id: &str) -> Result<Option<PluginRecord>, DbError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| DbError::InitError(format!("db lock poisoned: {e}")))?;
+        let row = conn
+            .query_row(
+                "SELECT id, manifest_json, enabled, source, installed_version, local_override_path, installed_at FROM plugins WHERE id = ?1",
+                params![id],
+                plugin_record_from_row,
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Insert or fully replace a plugin record (reinstall overwrites in place).
+    pub fn upsert_plugin(&self, record: &PluginRecord) -> Result<(), DbError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| DbError::InitError(format!("db lock poisoned: {e}")))?;
+        conn.execute(
+            "INSERT INTO plugins (id, manifest_json, enabled, source, installed_version, local_override_path, installed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, COALESCE(NULLIF(?7, ''), datetime('now')))
+             ON CONFLICT(id) DO UPDATE SET
+                manifest_json = excluded.manifest_json,
+                enabled = excluded.enabled,
+                source = excluded.source,
+                installed_version = excluded.installed_version,
+                local_override_path = excluded.local_override_path,
+                installed_at = excluded.installed_at",
+            params![
+                record.id,
+                record.manifest_json,
+                record.enabled,
+                record.source,
+                record.installed_version,
+                record.local_override_path,
+                record.installed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Permanently remove an installed plugin by id.
+    pub fn delete_plugin(&self, id: &str) -> Result<(), DbError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| DbError::InitError(format!("db lock poisoned: {e}")))?;
+        conn.execute("DELETE FROM plugins WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Toggle whether a plugin is enabled (disabled plugins are listed but
+    /// their commands are refused by `plugin_run`).
+    pub fn set_plugin_enabled(&self, id: &str, enabled: bool) -> Result<(), DbError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| DbError::InitError(format!("db lock poisoned: {e}")))?;
+        conn.execute(
+            "UPDATE plugins SET enabled = ?2 WHERE id = ?1",
+            params![id, enabled],
+        )?;
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -2899,5 +3033,71 @@ mod tests {
             .map(|g| g.id)
             .collect::<Vec<_>>();
         assert_eq!(ids, vec!["a", "b"], "order unchanged after rollback");
+    }
+
+    // -----------------------------------------------------------------------
+    // Plugin system
+    // -----------------------------------------------------------------------
+
+    fn sample_plugin(id: &str) -> PluginRecord {
+        PluginRecord {
+            id: id.to_string(),
+            manifest_json: r#"{"schema_version":1,"id":"mysql","name":"MySQL","version":"1.0.0","author":"a","commands":[{"id":"s","title":"S","runs":{"*":["true"]},"output":"text"}]}"#
+                .to_string(),
+            enabled: true,
+            source: "local".to_string(),
+            installed_version: "1.0.0".to_string(),
+            local_override_path: None,
+            installed_at: String::new(), // exercises the datetime('now') default
+        }
+    }
+
+    #[test]
+    fn plugin_upsert_list_get_delete_round_trip() {
+        let (db, _dir) = test_db();
+        db.upsert_plugin(&sample_plugin("mysql")).expect("insert");
+        let all = db.list_plugins().expect("list");
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, "mysql");
+        assert!(!all[0].installed_at.is_empty(), "installed_at defaults to now");
+
+        let got = db.get_plugin("mysql").expect("get").expect("present");
+        assert!(got.enabled);
+        assert_eq!(got.installed_version, "1.0.0");
+
+        db.delete_plugin("mysql").expect("delete");
+        assert!(db.get_plugin("mysql").expect("get after").is_none());
+        assert!(db.list_plugins().expect("list after").is_empty());
+    }
+
+    #[test]
+    fn plugin_upsert_overwrites_in_place() {
+        let (db, _dir) = test_db();
+        db.upsert_plugin(&sample_plugin("mysql")).expect("v1");
+        let mut v2 = sample_plugin("mysql");
+        v2.manifest_json = v2.manifest_json.replace("1.0.0", "2.0.0");
+        v2.installed_version = "2.0.0".into();
+        db.upsert_plugin(&v2).expect("v2");
+        let got = db.get_plugin("mysql").expect("get").expect("present");
+        assert_eq!(got.installed_version, "2.0.0");
+        assert_eq!(db.list_plugins().expect("list").len(), 1, "no duplicate rows");
+    }
+
+    #[test]
+    fn plugin_enable_toggle_persists() {
+        let (db, _dir) = test_db();
+        db.upsert_plugin(&sample_plugin("mysql")).expect("insert");
+        db.set_plugin_enabled("mysql", false).expect("disable");
+        assert!(!db.get_plugin("mysql").expect("get").expect("present").enabled);
+        db.set_plugin_enabled("mysql", true).expect("enable");
+        assert!(db.get_plugin("mysql").expect("get").expect("present").enabled);
+    }
+
+    #[test]
+    fn plugin_table_exists_from_migration_16() {
+        // Fresh DBs run every migration including 16; the table must be usable.
+        let (db, _dir) = test_db();
+        db.upsert_plugin(&sample_plugin("a")).expect("insert on migrated schema");
+        assert_eq!(db.list_plugins().expect("list").len(), 1);
     }
 }

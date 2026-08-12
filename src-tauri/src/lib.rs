@@ -2,6 +2,7 @@ mod ai;
 mod backup;
 mod db;
 mod editors;
+mod plugins;
 mod import;
 mod portforward;
 mod s3;
@@ -354,6 +355,12 @@ pub fn run() {
             tools::network::port_scan,
             tools::network::ping_check,
             tools::network::traceroute_check,
+            // Plugins
+            plugins::commands::plugin_run,
+            plugins::commands::plugin_install,
+            plugins::commands::plugin_uninstall,
+            plugins::commands::plugin_enable,
+            plugins::commands::plugin_list,
             // Build info
             is_release_build,
         ])

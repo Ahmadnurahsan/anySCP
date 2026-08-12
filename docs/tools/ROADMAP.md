@@ -145,3 +145,33 @@ Semua tools berjalan **melalui existing SSH session** — tidak ada koneksi baru
 - **Command berat / output besar** → TTL cache, truncate output, `max_output_bytes` guard.
 - **Session SCP-only** (tanpa SFTP) tetap bisa dipakai tools karena berbasis exec, bukan SFTP — tapi perlu `sudo -n true` preflight bila user memakai sudo.
 - **Scan etika** → port scan target default adalah host yang sedang dikonek; tambah konfirmasi untuk target lain.
+---
+
+## Plugin System (Phase A) ✅ (engine — backend only)
+
+> `src-tauri/src/plugins/`. Plugin = **JSON manifest** (bukan kode) → aman dari arbitrary code execution; komunitas cukup menulis JSON, tanpa menyentuh Rust.
+>
+> Branch: `feature/plugin-system` (dibuat dari `main` setelah Phase 1–3 di-merge).
+
+### Yang selesai (Phase A — engine)
+- **`os.rs`** — `OsFamily` enum (debian/rhel/arch/suse/alpine/windows/macos/freebsd/unknown) + deteksi via `uname -s` + `/etc/os-release` (fallback `cmd /c echo %OS%` untuk Windows). Hasil di-cache per session (5 menit).
+- **`manifest.rs`** — struct serde dengan `deny_unknown_fields` (field asing/typo = reject), validasi: schema_version, id/name/version/author, platform, runs (keluarga + `"linux"` fallback + `"*"`), variable type/select/regex, regex_table wajib named groups. Clamp keamanan: timeout ≤ 120s, output ≤ 16 MiB, cache TTL ≤ 3600s.
+- **`esc.rs`** — shell-escape POSIX (`'...'`) & cmd.exe (`"..."`), dipisah dua fungsi — anti command injection.
+- **`exec.rs`** — `ssh_exec_limited`: timeout hard + `max_output_bytes` di-enforce saat streaming (bukan truncate setelahnya).
+- **`parse.rs`** — 6 parser (raw/key_value/regex_table/csv/json/lines) → 4 widget output (text/table/metrics/json). Ini kunci "control panel tanpa UI per plugin".
+- **`commands.rs`** — `plugin_run`, `plugin_install` (file lokal ATAU URL raw), `plugin_uninstall`, `plugin_enable`, `plugin_list`. Interpolasi `{{variable}}` + hash cache per command/variable. Dangerous command: tidak pernah di-cache.
+- **DB** — migration 16 `plugins` (id, manifest_json, enabled, source, installed_version, local_override_path, installed_at) + CRUD di `HostDb`.
+- Tests: **+38** (Rust total 257). Clippy bersih untuk kode baru.
+
+### Belum (Phase B–D, sengaja ditunda)
+- **B — Generic renderer UI**: 4 widget frontend + halaman Plugins (list/detail/form variable/run). Effort UI 1× untuk semua plugin.
+- **C — Marketplace**: repo GitHub `anyscp-plugins`, halaman browse+install.
+- **D — Starter pack**: mysql, nginx, node/pm2, disk analyzer, security audit, DNS.
+
+### Alur `plugin_run` (ringkas)
+1. Load manifest dari SQLite → cek enabled.
+2. Deteksi OS family (cache 5 menit) → cek `supports()`.
+3. Resolve `runs` (family → linux → `*`); kosong = "not supported on this OS".
+4. Validasi variable (type/select/regex) → clamp timeout/output → interpolate dengan shell-escape per OS.
+5. Cek TTL cache (skipped untuk dangerous / `refresh`).
+6. Exec dengan timeout + output cap → parse sesuai parser → render ke widget.
