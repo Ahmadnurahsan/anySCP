@@ -24,7 +24,8 @@ use super::exec;
 use super::manifest::{parse_manifest, Plugin};
 use super::os::{self, OsFamily};
 use super::{
-    parse, PluginError, PluginInfo, PluginRunResult,
+    parse, validate_registry, PluginError, PluginInfo, PluginMarketplaceEntry, PluginRunResult,
+    MARKETPLACE_REGISTRY_URL,
 };
 
 /// How install receives a manifest: a local file path or a raw URL.
@@ -342,6 +343,51 @@ pub async fn plugin_list(db: State<'_, Arc<HostDb>>) -> Result<Vec<PluginInfo>, 
         }
     }
     Ok(out)
+}
+
+/// Fetch the marketplace registry (`registry.json` from the `anyscp-plugins`
+/// repo). The feed is a curated index of raw manifest URLs that
+/// [`plugin_install`] already knows how to install from — the marketplace adds
+/// discoverability, not a new install path.
+#[tauri::command]
+#[instrument(skip(tools))]
+pub async fn plugin_marketplace_list(
+    refresh: Option<bool>,
+    tools: State<'_, Arc<ToolsManager>>,
+) -> Result<Vec<PluginMarketplaceEntry>, PluginError> {
+    const TTL: u64 = 300;
+    let cache_key = "plugins:marketplace:registry".to_string();
+    if !refresh.unwrap_or(false) {
+        if let Some(v) = tools.cached(&cache_key, TTL) {
+            if let Ok(list) = serde_json::from_value::<Vec<PluginMarketplaceEntry>>(v) {
+                return Ok(list);
+            }
+        }
+    }
+
+    let url = MARKETPLACE_REGISTRY_URL.to_string();
+    let resp = tokio::time::timeout(Duration::from_secs(15), reqwest::get(&url))
+        .await
+        .map_err(|_| PluginError::FetchError("registry download timed out".into()))?
+        .map_err(|e| PluginError::FetchError(e.to_string()))?;
+    if !resp.status().is_success() {
+        return Err(PluginError::FetchError(format!(
+            "HTTP {} while fetching {url}",
+            resp.status()
+        )));
+    }
+    let raw = resp
+        .text()
+        .await
+        .map_err(|e| PluginError::FetchError(e.to_string()))?;
+    let list: Vec<PluginMarketplaceEntry> = serde_json::from_str(&raw)
+        .map_err(|e| PluginError::InvalidManifest(format!("bad registry: {e}")))?;
+    // Sanity gate — a broken feed is surfaced as an error and never cached.
+    validate_registry(&list)?;
+    if let Ok(v) = serde_json::to_value(&list) {
+        tools.store(&cache_key, v);
+    }
+    Ok(list)
 }
 
 impl From<Plugin> for PluginInfo {

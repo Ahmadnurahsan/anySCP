@@ -361,6 +361,7 @@ pub fn run() {
             plugins::commands::plugin_uninstall,
             plugins::commands::plugin_enable,
             plugins::commands::plugin_list,
+            plugins::commands::plugin_marketplace_list,
             // Build info
             is_release_build,
         ])

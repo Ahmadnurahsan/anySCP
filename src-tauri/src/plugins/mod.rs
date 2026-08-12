@@ -41,6 +41,12 @@ pub const MAX_OUTPUT_BYTES: u64 = 16 * 1024 * 1024;
 /// Hard ceiling for a cache TTL (seconds).
 pub const MAX_CACHE_TTL_SECS: u64 = 3600;
 
+/// Default registry feed for the plugin marketplace (Fase C). `registry.json`
+/// in the `anyscp-plugins` repo lists every plugin and where its manifest
+/// lives; raw.githubusercontent serves it as plain text (no CORS for reqwest).
+pub const MARKETPLACE_REGISTRY_URL: &str =
+    "https://raw.githubusercontent.com/Ahmadnurahsan/anyscp-plugins/main/registry.json";
+
 // ─── Result types we render ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +88,45 @@ pub struct PluginInfo {
     pub installed_version: String,
     pub installed_at: String,
     pub manifest: Plugin,
+}
+
+/// One row of the marketplace registry (`registry.json`). Render-only metadata
+/// plus the raw manifest `url` that `plugin_install` already knows how to
+/// fetch — the marketplace is just a curated index of install URLs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginMarketplaceEntry {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub author: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub platforms: Vec<String>,
+    /// Raw URL of the plugin manifest (http/https).
+    pub url: String,
+}
+
+/// Minimal sanity checks for a freshly-fetched registry. Rejected blobs never
+/// reach the frontend and are not cached.
+pub fn validate_registry(list: &[PluginMarketplaceEntry]) -> Result<(), PluginError> {
+    for e in list {
+        if e.id.trim().is_empty() || e.name.trim().is_empty() || e.version.trim().is_empty() {
+            return Err(PluginError::InvalidManifest(format!(
+                "registry entry {:?} is missing id/name/version",
+                e.id
+            )));
+        }
+        if !(e.url.starts_with("https://") || e.url.starts_with("http://")) {
+            return Err(PluginError::InvalidManifest(format!(
+                "registry entry {:?} has a non-http url",
+                e.id
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ─── Errors ────────────────────────────────────────────────────────────────
@@ -164,5 +209,54 @@ impl From<crate::types::SshError> for PluginError {
 impl From<crate::db::DbError> for PluginError {
     fn from(e: crate::db::DbError) -> Self {
         PluginError::IoError(e.to_string())
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, url: &str) -> PluginMarketplaceEntry {
+        PluginMarketplaceEntry {
+            id: id.to_string(),
+            name: id.to_string(),
+            version: "1.0.0".to_string(),
+            author: "anySCP".to_string(),
+            description: None,
+            icon: None,
+            platforms: vec![],
+            url: url.to_string(),
+        }
+    }
+
+    #[test]
+    fn registry_accepts_valid_entries() {
+        let list = vec![
+            entry("system", "https://raw.githubusercontent.com/x/y/main/plugins/system/manifest.json"),
+            entry("mysql", "http://example.com/mysql.json"),
+        ];
+        assert!(validate_registry(&list).is_ok());
+    }
+
+    #[test]
+    fn registry_rejects_empty_id() {
+        let list = vec![entry("", "https://example.com/m.json")];
+        assert!(matches!(
+            validate_registry(&list),
+            Err(PluginError::InvalidManifest(_))
+        ));
+    }
+
+    #[test]
+    fn registry_rejects_non_http_url() {
+        let list = vec![entry("x", "file:///tmp/m.json")];
+        assert!(matches!(
+            validate_registry(&list),
+            Err(PluginError::InvalidManifest(_))
+        ));
+    }
+
+    #[test]
+    fn marketplace_registry_url_is_https() {
+        assert!(MARKETPLACE_REGISTRY_URL.starts_with("https://"));
     }
 }
